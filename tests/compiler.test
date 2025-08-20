@@ -1,0 +1,86 @@
+# tclcompiler tests: compile provided scripts into .tbc files
+
+if {"::tcltest" ni [namespace children]} {
+    package require tcltest 2.5
+    namespace import -force ::tcltest::*
+}
+package require compiler
+namespace eval ::tcltest {}
+
+# Determine extension for compiled bytecode files
+if {[info commands compiler::getBytecodeExtension] ne ""} {
+    set tbcExt [compiler::getBytecodeExtension]
+} else {
+    set tbcExt ".tbc"
+}
+
+set testDir [file normalize [file dirname [info script]]]
+set outDir  [file join $testDir out]
+file mkdir $outDir
+
+proc compile_one {src} {
+    variable tbcExt
+    set testDir [file normalize [file dirname [info script]]]
+    set outDir  [file join $testDir out]
+    set in  [file join $testDir $src]
+    set out [file rootname [file tail $src]]
+    set out [file join $outDir "${out}$tbcExt"]
+    if {[file exists $out]} { file delete -force $out }
+    compiler::compile $in $out
+    return [file exists $out]
+}
+
+test compiler-1.1 {compile tc1.tcl -> .tbc} -body {
+    compile_one tc1.tcl
+} -result 1
+
+test compiler-1.2 {compile tc2.tcl -> .tbc} -body {
+    compile_one tc2.tcl
+} -result 1
+
+test compiler-1.3 {compile tc3.tcl -> .tbc} -body {
+    compile_one tc3.tcl
+} -result 1
+
+test compiler-1.4 {compile tc4.tcl -> .tbc} -body {
+    compile_one tc4.tcl
+} -result 1
+
+test compiler-2.1 {getBytecodeExtension returns a string} -body {
+    string match ".*" $tbcExt
+} -result 1
+
+test compiler-2.2 {default output naming when no explicit output provided} -body {
+    set testDir [file normalize [file dirname [info script]]]
+    set in [file join $testDir tc1.tcl]
+    set defOut [file rootname $in]$tbcExt
+    if {[file exists $defOut]} { file delete -force $defOut }
+    compiler::compile $in
+    file exists $defOut
+} -result 1
+
+test compiler-2.3 {compile with -preamble writes out file} -body {
+    set outDir  [file join [file dirname [info script]] out]
+    file mkdir $outDir
+    set in   [file join [file dirname [info script]] tc1.tcl]
+    set out  [file join $outDir tc1pre$tbcExt]
+    if {[file exists $out]} { file delete -force $out }
+    compiler::compile -preamble {set ::_p 1} $in $out
+    file exists $out
+} -result 1
+
+test compiler-2.4 {invalid source yields error} -body {
+    catch { compiler::compile [file join [file dirname [info script]] no_such.tcl] } msg
+    string match "*couldn't read file*" $msg
+} -result 1
+
+test compiler-2.5 {compile namespace/proc script (tc6)} -body {
+    compile_one tc6.tcl
+} -result 1
+
+test compiler-2.6 {compile erroring proc script (tc5)} -body {
+    compile_one tc5.tcl
+} -result 1
+
+::tcltest::cleanupTests
+return
