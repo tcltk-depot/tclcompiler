@@ -1,234 +1,172 @@
-
-#include "cmpInt.h"
-#include "cmpWrite.h"
-
 /*
  * cmpWPkg.c --
  *
- *	This file contains the C interfaces to the Tcl load command for the
- *  Compiler package: the Tclcompiler_Init function.
- *
- * Copyright (c) 1998-2000 by Ajuba Solutions.
- *
- * Copyright (c) 2018 ActiveState Software Inc.
- * Released under the BSD-3 license. See LICENSE file for details.
- *
- * RCS: @(#) $Id: cmpWPkg.c,v 1.6 2005/03/18 23:42:12 hobbs Exp $
+ *  Compiler package initialization (writer).
+ *  Tcl 9 modernization:
+ *    - Provide package "tclcompiler" while installing commands under "::compiler"
+ *    - No string eval; idempotent namespace handling
+ *    - Const-correct tables; modern ObjCmd signatures (void*, Tcl_Size)
+ *    - Safe string assembly via Tcl_DString
  */
 
-/*
- * name and version of this package
- */
+#include <string.h>
+#include "cmpInt.h"
+#include "cmpWrite.h"
 
-static char packageName[]    = CMP_WRITER_PACKAGE;
-static char packageVersion[] = PACKAGE_VERSION;
+/* Package identity (TEA) – THIS is what we 'provide' */
+static char packageName[] = PACKAGE_NAME;       /* "tclcompiler" */
+static char packageVersion[] = PACKAGE_VERSION; /* e.g. "1.9.0" */
 
-/*
- * Default error message for the missing bytecode loader: variable name and
- * variable value.
- */
+/* Public namespace where commands live */
+static const char nsName[] = CMP_WRITER_PACKAGE; /* "compiler" */
 
+/* Default error variable/value for missing loader */
 static char errorVariable[] = LOADER_ERROR_VARIABLE;
 static char errorMessage[] = LOADER_ERROR_MESSAGE;
 
-/*
- * List of variables to create when the package is loaded
- */
-
+/* Tables */
 typedef struct VarTable
 {
-    char *varName;
-    char *varValue;
+    const char* varName;
+    const char* varValue;
 } VarTable;
-
-static const VarTable variables[] =
-{
-    { errorVariable,		errorMessage },
-
-    { 0, 0 }
-};
-
-/*
- * List of commands to create when the package is loaded
- */
-
-static int Compiler_GetTclVerObjCmd (ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]);
 
 typedef struct CmdTable
 {
-    char *cmdName;		/* command name */
-    Tcl_ObjCmdProc *proc;	/* command proc */
-    int exportIt;		/* if 1, export the command */
+    const char* cmdName;   /* unqualified subcommand */
+    Tcl_ObjCmdProc2* proc; /* implementation */
+    int exportIt;          /* nonzero => export */
 } CmdTable;
 
-static const CmdTable commands[] =
+/* Local command (modern signature) */
+static int Compiler_GetTclVerObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[]);
+
+/* Variables & commands installed by this package */
+static const VarTable variables[] = {{errorVariable, errorMessage}, {NULL, NULL}};
+
+static const CmdTable commands[] = {{"compile", Compiler_CompileObjCmd, 1},
+                                    {"getBytecodeExtension", Compiler_GetBytecodeExtensionObjCmd, 1},
+                                    {"getTclVer", Compiler_GetTclVerObjCmd, 1},
+                                    {NULL, NULL, 0}};
+
+/* --- helpers --- */
+static Tcl_Namespace* GetOrCreateNamespace(Tcl_Interp* interp, const char* name)
 {
-    { "compile",		Compiler_CompileObjCmd,			1 },
-    { "getBytecodeExtension",	Compiler_GetBytecodeExtensionObjCmd,	1 },
-    { "getTclVer",              Compiler_GetTclVerObjCmd,		1 },
-    { 0, 0, 0 }
-};
+    Tcl_Namespace* ns = Tcl_FindNamespace(interp, name, NULL, TCL_GLOBAL_ONLY);
+    if (!ns)
+    {
+        ns = Tcl_CreateNamespace(interp, name, NULL, NULL);
+    }
+    return ns;
+}
 
-/*
- * Declarations for functions defined in this file.
- */
-
-static int RegisterCommand (Tcl_Interp* interp, char *namespace, const CmdTable *cmdTablePtr);
-static int RegisterVariable (Tcl_Interp* interp, char *namespace, const VarTable *varTablePtr);
-
-/*
- *----------------------------------------------------------------------
- *
- * Tclcompiler_Init --
- *
- *	This procedure initializes the Compiler package.
- *
- * Results:
- *	A standard Tcl result.
- *
- * Side effects:
- *	None.
- *
- *----------------------------------------------------------------------
- */
-
-int
-Tclcompiler_Init(Tcl_Interp *interp)
+static int RegisterCommand(Tcl_Interp* interp, const char* ns, const CmdTable* cmd)
 {
-    const CmdTable *cmdTablePtr;
-    const VarTable *varTablePtr;
+    Tcl_Namespace* nsp = GetOrCreateNamespace(interp, ns);
+    if (!nsp)
+        return TCL_ERROR;
 
+    Tcl_DString fq;
+    Tcl_DStringInit(&fq);
+    Tcl_DStringAppend(&fq, ns, -1);
+    Tcl_DStringAppend(&fq, "::", 2);
+    Tcl_DStringAppend(&fq, cmd->cmdName, -1);
+
+    Tcl_CreateObjCommand2(interp, Tcl_DStringValue(&fq), cmd->proc, NULL, NULL);
+    Tcl_DStringFree(&fq);
+
+    if (cmd->exportIt)
+    {
+        if (Tcl_Export(interp, nsp, cmd->cmdName, 0) != TCL_OK)
+            return TCL_ERROR;
+    }
+    return TCL_OK;
+}
+
+static int RegisterVariable(Tcl_Interp* interp, const char* ns, const VarTable* var)
+{
+    if (!GetOrCreateNamespace(interp, ns))
+        return TCL_ERROR;
+
+    Tcl_DString fq;
+    Tcl_DStringInit(&fq);
+    Tcl_DStringAppend(&fq, ns, -1);
+    Tcl_DStringAppend(&fq, "::", 2);
+    Tcl_DStringAppend(&fq, var->varName, -1);
+
+    Tcl_Obj* val = Tcl_NewStringObj(var->varValue, -1);
+    Tcl_IncrRefCount(val);
+    /* No TCL_GLOBAL_ONLY here: name is fully-qualified, let Tcl resolve to ::ns::var */
+    if (Tcl_SetVar2Ex(interp, Tcl_DStringValue(&fq), NULL, val, 0) == NULL)
+    {
+        Tcl_DecrRefCount(val);
+        Tcl_DStringFree(&fq);
+        return TCL_ERROR;
+    }
+    Tcl_DecrRefCount(val);
+    Tcl_DStringFree(&fq);
+    return TCL_OK;
+}
+
+/* --- public init(s) --- */
+
+int Tclcompiler_Init(Tcl_Interp* interp)
+{
 #ifdef USE_TCL_STUBS
-    if (Tcl_InitStubs(interp, "9.0", 1) == NULL) {
-	return TCL_ERROR;
+    if (!Tcl_InitStubs(interp, "9.0", 1))
+    {
+        return TCL_ERROR;
     }
 #else
-    if (Tcl_PkgRequire(interp, "Tcl", "9.0", 1) == NULL) {
-	return TCL_ERROR;
+    if (Tcl_PkgRequire(interp, "Tcl", "9.0", 1) == NULL)
+    {
+        return TCL_ERROR;
     }
 #endif
 
-    CompilerInit(interp);
+    /* Initialize writer core */
+    CompilerInit(interp); /* (signature in cmpWrite.h; returns void in original) */
 
-    for (cmdTablePtr=&commands[0] ; cmdTablePtr->cmdName ; cmdTablePtr++) {
-        if (RegisterCommand(interp, packageName, cmdTablePtr) != TCL_OK) {
+    /* Install commands into ::compiler */
+    for (const CmdTable* ct = &commands[0]; ct->cmdName; ct++)
+    {
+        if (RegisterCommand(interp, nsName, ct) != TCL_OK)
+        {
             return TCL_ERROR;
         }
     }
 
-    for (varTablePtr=&variables[0] ; varTablePtr->varName ; varTablePtr++) {
-        if (RegisterVariable(interp, packageName, varTablePtr) != TCL_OK) {
+    /* Install variables into ::compiler */
+    for (const VarTable* vt = &variables[0]; vt->varName; vt++)
+    {
+        if (RegisterVariable(interp, nsName, vt) != TCL_OK)
+        {
             return TCL_ERROR;
         }
     }
 
+    /* Provide the package under its TEA/package name: "tclcompiler" */
     return Tcl_PkgProvide(interp, packageName, packageVersion);
 }
-
-/*
- *----------------------------------------------------------------------
- *
- * RegisterCommand --
- *
- *	This procedure registers a command in the context of the given
- *	namespace.
- *
- * Results:
- *	A standard Tcl result.
- *
- * Side effects:
- *	None.
- *
- *----------------------------------------------------------------------
- */
 
-static int
-RegisterCommand(Tcl_Interp* interp, char *namespace, const CmdTable *cmdTablePtr)
+/* Safe init: same surface */
+int Tclcompiler_SafeInit(Tcl_Interp* interp)
 {
-    char buf[128];
+    return Tclcompiler_Init(interp);
+}
 
-    if (cmdTablePtr->exportIt) {
-	sprintf(buf, "namespace eval %s { namespace export %s }",
-		namespace, cmdTablePtr->cmdName);
-	if (Tcl_Eval(interp, buf) != TCL_OK)
-	    return TCL_ERROR;
-    }
-
-    sprintf(buf, "%s::%s", namespace, cmdTablePtr->cmdName);
-    Tcl_CreateObjCommand(interp, buf, cmdTablePtr->proc, 0, 0);
-
+/* --- simple utility subcommand: ::compiler::getTclVer --- */
+static int Compiler_GetTclVerObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[])
+{
+    (void)dummy;
+    (void)objc;
+    (void)objv;
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(TCL_VERSION, -1));
     return TCL_OK;
 }
-
-/*
- *----------------------------------------------------------------------
- *
- * RegisterVariable --
- *
- *	This procedure registers a variable in the context of the given namespace.
- *
- * Results:
- *	A standard Tcl result.
- *
- * Side effects:
- *	None.
- *
- *----------------------------------------------------------------------
- */
 
-static int
-RegisterVariable(Tcl_Interp* interp, char *namespace, const VarTable *varTablePtr)
-{
-    char buf[1024];
-    sprintf(buf, "namespace eval %s { variable %s {%s} }",
-            namespace, varTablePtr->varName, varTablePtr->varValue);
-    if (Tcl_Eval(interp, buf) != TCL_OK)
-        return TCL_ERROR;
-
-    return TCL_OK;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * CompilerGetPackageName --
- *
- *  Returns the package name for the compiler package.
- *
- * Results:
- *	See above.
- *
- * Side effects:
- *	None.
- *
- *----------------------------------------------------------------------
- */
-
-const char *
-CompilerGetPackageName()
+/* For tests/tools */
+const char* CompilerGetPackageName(void)
 {
     return packageName;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * Tbcload_VerObjCmd --
- *
- * Return the Tcl version this package was compiled against.
- *
- * Results:
- *  Returns a standard TCL result code.
- *
- * Side effects:
- *  None.
- *
- *----------------------------------------------------------------------
- */
-
-static int
-Compiler_GetTclVerObjCmd(ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
-{
-  Tcl_SetObjResult (interp, Tcl_NewStringObj (TCL_VERSION, -1));
-  return TCL_OK;
 }

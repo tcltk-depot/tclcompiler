@@ -1,10 +1,12 @@
+#-*-Tcl-*-
 # tclcompiler tests: compile provided scripts into .tbc files
 
 if {"::tcltest" ni [namespace children]} {
     package require tcltest 2.5
     namespace import -force ::tcltest::*
 }
-package require compiler
+
+package require tclcompiler
 namespace eval ::tcltest {}
 
 # Determine extension for compiled bytecode files

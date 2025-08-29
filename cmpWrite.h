@@ -32,25 +32,24 @@
 
 #undef TCL_STORAGE_CLASS
 #ifdef BUILD_tclcompiler
-#   define TCL_STORAGE_CLASS DLLEXPORT
+#define TCL_STORAGE_CLASS DLLEXPORT
 #else
-#   define TCL_STORAGE_CLASS DLLIMPORT
+#define TCL_STORAGE_CLASS DLLIMPORT
 #endif
 
-EXTERN int Compiler_CompileObjCmd (ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]);
-EXTERN int Compiler_CompileFile (Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char *preamblePtr);
-EXTERN int Compiler_CompileObj (Tcl_Interp *interp, Tcl_Obj *objPtr);
-EXTERN int Compiler_GetBytecodeExtensionObjCmd (ClientData dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]);
+EXTERN int Compiler_CompileObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[]);
+EXTERN int Compiler_CompileFile(Tcl_Interp* interp, char* inFilePtr, char* outFilePtr, char* preamblePtr);
+EXTERN int Compiler_CompileObj(Tcl_Interp* interp, Tcl_Obj* objPtr);
+EXTERN int Compiler_GetBytecodeExtensionObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[]);
 
-EXTERN const char *CompilerGetPackageName (void);
-EXTERN int	Compiler_Init (Tcl_Interp *interp);
+EXTERN const char* CompilerGetPackageName(void);
+EXTERN int Compiler_Init(Tcl_Interp* interp);
 
 /*
  * Declarations for functions defined in this file.
  */
 
-EXTERN int Tclcompiler_Init (Tcl_Interp *interp);
-
+EXTERN int Tclcompiler_Init(Tcl_Interp* interp);
 
 #undef TCL_STORAGE_CLASS
 #define TCL_STORAGE_CLASS DLLIMPORT

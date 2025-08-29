@@ -13,25 +13,25 @@
  * RCS: @(#) $Id: cmpWrite.c,v 1.7 2005/03/19 00:44:00 hobbs Exp $
  */
 
-#include "cmpInt.h"
 #include "cmpWrite.h"
-
-/*#define DEBUG_REWRITE*/
+#include "cmpInt.h"
 
 /*
  * A ProcInfo structure is used to store temporary information about the
  * current proc command implementation.
  */
-typedef struct ProcInfo {
-    Command *procCmdPtr;
-    CompileProc *savedCompileProc;
+typedef struct ProcInfo
+{
+    Command* procCmdPtr;
+    CompileProc* savedCompileProc;
 } ProcInfo;
 
 /*
  * A ObjRefInfo structure holds the information on references to an object
  * in the compile environment's object table.
  */
-typedef struct ObjRefInfo {
+typedef struct ObjRefInfo
+{
     Tcl_Size numReferences;     /* how many times this object is used as an
                                  * operand to opcodes. If this number is
                                  * greater than 1, then we assume that this
@@ -53,11 +53,12 @@ typedef struct ObjRefInfo {
  */
 #define ENCODED_BUFFER_SIZE 72
 
-typedef struct A85EncodeContext {
+typedef struct A85EncodeContext
+{
     Tcl_Channel target; /* the target channel; when the encoding buffer is full, it is written out to it */
-    char *basePtr;      /* base of the encoding buffer */
-    char *curPtr;       /* current available position in the encoding buffer */
-    char *endPtr;       /* one past the last available position in the buffer; when curPtr == endPtr, the buffer is full */
+    char* basePtr;      /* base of the encoding buffer */
+    char* curPtr;       /* current available position in the encoding buffer */
+    char* endPtr;       /* one past the last available position in the buffer; when curPtr == endPtr, the buffer is full */
     char separator;     /* written to the target channel after each flush of the encode buffer */
     char encBuffer[ENCODED_BUFFER_SIZE]; /* the encoding buffer */
 } A85EncodeContext;
@@ -66,7 +67,7 @@ typedef struct A85EncodeContext {
  * Mask for rwx flags in struct stat's st_mode
  */
 #ifndef ACCESSPERMS
-# define ACCESSPERMS    0777
+#define ACCESSPERMS 0777
 #endif
 
 /*
@@ -109,12 +110,12 @@ if {[catch {package require %s %s} err] == 1} {\n\
 ";
 #endif
 
-static char errorMessage[]  = LOADER_ERROR_MESSAGE;
+static char errorMessage[] = LOADER_ERROR_MESSAGE;
 static char errorVariable[] = LOADER_ERROR_VARIABLE;
-static char evalCommand[]   = CMP_EVAL_COMMAND;
-static char loaderName[]    = CMP_READER_PACKAGE;
+static char evalCommand[] = CMP_EVAL_COMMAND;
+static char loaderName[] = CMP_READER_PACKAGE;
 static char loaderVersion[] = CMP_VERSION;
-static char procCommand[]   = CMP_PROC_COMMAND;
+static char procCommand[] = CMP_PROC_COMMAND;
 
 /*
  * The following variables make up the pieces of the script postamble
@@ -139,10 +140,7 @@ static char postambleFormat[] = "}";
  * This map must be kept consistent with the equivalent one in cmpRead.c.
  */
 static ExcRangeMap excRangeMap[] = {
-    { LOOP_EXCEPTION_RANGE, CMP_LOOP_EXCEPTION_RANGE },
-    { CATCH_EXCEPTION_RANGE, CMP_CATCH_EXCEPTION_RANGE },
-    { 0, '\0' }
-};
+    {LOOP_EXCEPTION_RANGE, CMP_LOOP_EXCEPTION_RANGE}, {CATCH_EXCEPTION_RANGE, CMP_CATCH_EXCEPTION_RANGE}, {0, '\0'}};
 
 /*
  * The list of VAR_ flag values to check when emitting. The order is
@@ -154,7 +152,17 @@ static int varFlagsList[] = {
      * For 8.5+, keep the same size for compat with 8.4 written bytecodes,
      * but ignore all but VAR_ARGUMENT and VAR_TEMPORARY.
      */
-    0, 0, 0, 0, 0, 0, 0, 0, VAR_ARGUMENT, VAR_TEMPORARY, 0          /* VAR_RESOLVED is always mapped as 0 */
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    VAR_ARGUMENT,
+    VAR_TEMPORARY,
+    0 /* VAR_RESOLVED is always mapped as 0 */
 };
 static int varFlagsListSize = sizeof(varFlagsList) / sizeof(varFlagsList[0]);
 
@@ -165,94 +173,94 @@ static int varFlagsListSize = sizeof(varFlagsList) / sizeof(varFlagsList[0]);
  * codes arithmetically.
  * (for hilit: ")
  */
-#define EN(c)   encodeMap[(c)]
+#define EN(c) encodeMap[(c)]
 
 static char encodeMap[] = {
-    '!',        /*  0: ! */
-    'v',        /*  1: was ", is now v (and this is for hilit:") */
-    '#',        /*  2: # */
-    'w',        /*  3: was $, is now w */
-    '%',        /*  4: % */
-    '&',        /*  5: & */
-    '\'',       /*  6: ' */
-    '(',        /*  7: ( */
-    ')',        /*  8: ) */
-    '*',        /*  9: * */
-    '+',        /* 10: + */
-    ',',        /* 11: , */
-    '-',        /* 12: - */
-    '.',        /* 13: . */
-    '/',        /* 14: / */
-    '0',        /* 15: 0 */
-    '1',        /* 16: 1 */
-    '2',        /* 17: 2 */
-    '3',        /* 18: 3 */
-    '4',        /* 19: 4 */
-    '5',        /* 20: 5 */
-    '6',        /* 21: 6 */
-    '7',        /* 22: 7 */
-    '8',        /* 23: 8 */
-    '9',        /* 24: 9 */
-    ':',        /* 25: : */
-    ';',        /* 26: ; */
-    '<',        /* 27: < */
-    '=',        /* 28: = */
-    '>',        /* 29: > */
-    '?',        /* 30: ? */
-    '@',        /* 31: @ */
-    'A',        /* 32: A */
-    'B',        /* 33: B */
-    'C',        /* 34: C */
-    'D',        /* 35: D */
-    'E',        /* 36: E */
-    'F',        /* 37: F */
-    'G',        /* 38: G */
-    'H',        /* 39: H */
-    'I',        /* 40: I */
-    'J',        /* 41: J */
-    'K',        /* 42: K */
-    'L',        /* 43: L */
-    'M',        /* 44: M */
-    'N',        /* 45: N */
-    'O',        /* 46: O */
-    'P',        /* 47: P */
-    'Q',        /* 48: Q */
-    'R',        /* 49: R */
-    'S',        /* 50: S */
-    'T',        /* 51: T */
-    'U',        /* 52: U */
-    'V',        /* 53: V */
-    'W',        /* 54: W */
-    'X',        /* 55: X */
-    'Y',        /* 56: Y */
-    'Z',        /* 57: Z */
-    'x',        /* 58: was [, is now x */
-    'y',        /* 59: was \, is now y */
-    '|',        /* 60: was ], is now | */
-    '^',        /* 61: ^ */
-    '_',        /* 62: _ */
-    '`',        /* 63: ` */
-    'a',        /* 64: a */
-    'b',        /* 65: b */
-    'c',        /* 66: c */
-    'd',        /* 67: d */
-    'e',        /* 68: e */
-    'f',        /* 69: f */
-    'g',        /* 70: g */
-    'h',        /* 71: h */
-    'i',        /* 72: i */
-    'j',        /* 73: j */
-    'k',        /* 74: k */
-    'l',        /* 75: l */
-    'm',        /* 76: m */
-    'n',        /* 77: n */
-    'o',        /* 78: o */
-    'p',        /* 79: p */
-    'q',        /* 80: q */
-    'r',        /* 81: r */
-    's',        /* 82: s */
-    't',        /* 83: t */
-    'u'         /* 84: u */
+    '!',  /*  0: ! */
+    'v',  /*  1: was ", is now v (and this is for hilit:") */
+    '#',  /*  2: # */
+    'w',  /*  3: was $, is now w */
+    '%',  /*  4: % */
+    '&',  /*  5: & */
+    '\'', /*  6: ' */
+    '(',  /*  7: ( */
+    ')',  /*  8: ) */
+    '*',  /*  9: * */
+    '+',  /* 10: + */
+    ',',  /* 11: , */
+    '-',  /* 12: - */
+    '.',  /* 13: . */
+    '/',  /* 14: / */
+    '0',  /* 15: 0 */
+    '1',  /* 16: 1 */
+    '2',  /* 17: 2 */
+    '3',  /* 18: 3 */
+    '4',  /* 19: 4 */
+    '5',  /* 20: 5 */
+    '6',  /* 21: 6 */
+    '7',  /* 22: 7 */
+    '8',  /* 23: 8 */
+    '9',  /* 24: 9 */
+    ':',  /* 25: : */
+    ';',  /* 26: ; */
+    '<',  /* 27: < */
+    '=',  /* 28: = */
+    '>',  /* 29: > */
+    '?',  /* 30: ? */
+    '@',  /* 31: @ */
+    'A',  /* 32: A */
+    'B',  /* 33: B */
+    'C',  /* 34: C */
+    'D',  /* 35: D */
+    'E',  /* 36: E */
+    'F',  /* 37: F */
+    'G',  /* 38: G */
+    'H',  /* 39: H */
+    'I',  /* 40: I */
+    'J',  /* 41: J */
+    'K',  /* 42: K */
+    'L',  /* 43: L */
+    'M',  /* 44: M */
+    'N',  /* 45: N */
+    'O',  /* 46: O */
+    'P',  /* 47: P */
+    'Q',  /* 48: Q */
+    'R',  /* 49: R */
+    'S',  /* 50: S */
+    'T',  /* 51: T */
+    'U',  /* 52: U */
+    'V',  /* 53: V */
+    'W',  /* 54: W */
+    'X',  /* 55: X */
+    'Y',  /* 56: Y */
+    'Z',  /* 57: Z */
+    'x',  /* 58: was [, is now x */
+    'y',  /* 59: was \, is now y */
+    '|',  /* 60: was ], is now | */
+    '^',  /* 61: ^ */
+    '_',  /* 62: _ */
+    '`',  /* 63: ` */
+    'a',  /* 64: a */
+    'b',  /* 65: b */
+    'c',  /* 66: c */
+    'd',  /* 67: d */
+    'e',  /* 68: e */
+    'f',  /* 69: f */
+    'g',  /* 70: g */
+    'h',  /* 71: h */
+    'i',  /* 72: i */
+    'j',  /* 73: j */
+    'k',  /* 74: k */
+    'l',  /* 75: l */
+    'm',  /* 76: m */
+    'n',  /* 77: n */
+    'o',  /* 78: o */
+    'p',  /* 79: p */
+    'q',  /* 80: q */
+    'r',  /* 81: r */
+    's',  /* 82: s */
+    't',  /* 83: t */
+    'u'   /* 84: u */
 };
 
 /*
@@ -261,17 +269,17 @@ static char encodeMap[] = {
  * exported by the TCL DLL, and therefore if we use the address of the
  * standard types we get an undefined symbol at link time.
  */
-static const Tcl_ObjType *cmpProcBodyType = 0;
-static const Tcl_ObjType *cmpByteCodeType = 0;
-static const Tcl_ObjType *cmpDoubleType = 0;
-static const Tcl_ObjType *cmpIntType = 0;
+static const Tcl_ObjType* cmpProcBodyType = 0;
+static const Tcl_ObjType* cmpByteCodeType = 0;
+static const Tcl_ObjType* cmpDoubleType = 0;
+static const Tcl_ObjType* cmpIntType = 0;
 
 /*
  * Same thing for AuxDataTypes.
  */
-static const AuxDataType *cmpJumptableInfoType = 0;
-static const AuxDataType *cmpDictUpdateInfoType = 0;
-static const AuxDataType *cmpNewForeachInfoType = 0;
+static const AuxDataType* cmpJumptableInfoType = 0;
+static const AuxDataType* cmpDictUpdateInfoType = 0;
+static const AuxDataType* cmpNewForeachInfoType = 0;
 
 static int didLoadTypes = 0;
 
@@ -280,68 +288,67 @@ static int didLoadTypes = 0;
  * and counter used to generate unique names.
  */
 static char dummyCommandName[] = "$$compiler$$dummy%d";
-static int  dummyCommandCounter = 1;
+static int dummyCommandCounter = 1;
 
 /*
  * Prototypes for procedures defined later in this file:
  */
-static int  A85EmitChar (Tcl_Interp *interp, int toEmit, A85EncodeContext *ctxPtr);
-static int  A85EncodeBytes (Tcl_Interp *interp, unsigned char *bytesPtr, Tcl_Size numBytes, A85EncodeContext *ctxPtr);
-static int  A85Flush (Tcl_Interp *interp, A85EncodeContext *ctxPtr);
-static void A85InitEncodeContext (Tcl_Channel target, int separator, A85EncodeContext *ctxPtr);
-static void AppendInstLocList (Tcl_Interp *interp, CompileEnv *envPtr);
-static Tcl_Size CalculateLocArrayLength (unsigned char* bytes, Tcl_Size numCommands);
-static void CalculateLocMapSizes (ByteCode *codePtr, LocMapSizes *sizes);
-static void CleanObjRefInfoTable (PostProcessInfo *locInfoPtr);
-static void CleanCompilerContext (void *clientData, Tcl_Interp *interp);
-static int  CompileObject (Tcl_Interp *interp, Tcl_Obj *objPtr);
-static int  CompileOneProcBody (Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *ctxPtr, CompileEnv *compEnvPtr);
-static int  CompileProcBodies (Tcl_Interp *interp, CompileEnv *compEnvPtr);
-static void CreateProcBodyInfoArray (PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *** arrayPtrPtr);
-static PostProcessInfo *CreatePostProcessInfo (void);
-static InstLocList *CreateInstLocList (CompileEnv *envPtr);
-static void CmpDeleteProc (void *clientData);
-static int  DummyObjInterpProc (void *clientData, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]);
-static int  EmitAuxDataArray (Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan);
-static int  EmitByteCode (Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan);
-static int  EmitByteSequence (Tcl_Interp *interp, unsigned char *bytesPtr, Tcl_Size length, Tcl_Channel chan);
-static int  EmitChar (Tcl_Interp *interp, int value, int separator, Tcl_Channel chan);
-static int  EmitCompiledLocal (Tcl_Interp *interp, CompiledLocal* localPtr, Tcl_Channel chan);
-static int  EmitCompiledObject (Tcl_Interp *interp, Tcl_Obj *objPtr, Tcl_Channel chan);
-static int  EmitExcRangeArray (Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan);
-static int  EmitJumptableInfo (Tcl_Interp *interp, JumptableInfo *infoPtr, Tcl_Channel chan);
-static int  EmitDictUpdateInfo (Tcl_Interp *interp, DictUpdateInfo *infoPtr, Tcl_Channel chan);
-static int  EmitNewForeachInfo (Tcl_Interp *interp, ForeachInfo *infoPtr, Tcl_Channel chan);
-static int  EmitTclSize (Tcl_Interp *interp, Tcl_Size value, int separator, Tcl_Channel chan);
-static int  EmitObjArray (Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan);
-static int  EmitObject (Tcl_Interp *interp, Tcl_Obj* objPtr, Tcl_Channel chan);
-static int  EmitProcBody (Tcl_Interp *interp, Proc *procPtr, Tcl_Channel chan);
-static int  EmitScriptPostamble (Tcl_Interp *interp, Tcl_Channel chan);
-static int  EmitScriptPreamble (Tcl_Interp *interp, Tcl_Channel chan);
-static int  EmitSignature (Tcl_Interp *interp, Tcl_Channel chan);
-static int  EmitString (Tcl_Interp *interp, char *src, Tcl_Size length, int separator, Tcl_Channel chan);
-static void FreeProcBodyInfoArray (PostProcessInfo *infoPtr);
-static void FreePostProcessInfo (PostProcessInfo *infoPtr);
-static Tcl_Size GetSharedIndex (unsigned char *pc);
-static void InitCompilerContext (Tcl_Interp *interp);
-static void InitTypes (void);
-static void LoadObjRefInfoTable (PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr);
-static void LoadProcBodyInfo (InstLocList *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *infoPtr);
-static int  LocalProcCompileProc (Tcl_Interp *interp, Tcl_Parse *parsePtr, Command* cmdPtr, struct CompileEnv *compEnvPtr);
-static char NameFromExcRange (ExceptionRangeType type);
-static int  PostProcessCompile (Tcl_Interp *interp, struct CompileEnv *compEnvPtr, void *clientData);
-static void PrependResult (Tcl_Interp *interp, char *msgPtr);
-static void ReleaseCompilerContext (Tcl_Interp *interp);
-static int  ReplacePushIndex (Tcl_Size commandIndex, unsigned char *pc, Tcl_Size newIndex, CompileEnv *compEnvPtr);
-static void ShiftByteCodes (Tcl_Size commandIndex, Tcl_Size startOffset, Tcl_Size shiftCount, CompileEnv *compEnvPtr);
-static int  UnshareObject (Tcl_Size origIndex, CompileEnv *compEnvPtr);
-static void UnshareProcBodies (Tcl_Interp *interp, CompilerContext *ctxPtr, CompileEnv *compEnvPtr);
-static void UpdateByteCodes (PostProcessInfo *infoPtr, CompileEnv *compEnvPtr);
+static int A85EmitChar(Tcl_Interp* interp, int toEmit, A85EncodeContext* ctxPtr);
+static int A85EncodeBytes(Tcl_Interp* interp, unsigned char* bytesPtr, Tcl_Size numBytes, A85EncodeContext* ctxPtr);
+static int A85Flush(Tcl_Interp* interp, A85EncodeContext* ctxPtr);
+static void A85InitEncodeContext(Tcl_Channel target, int separator, A85EncodeContext* ctxPtr);
+static void AppendInstLocList(Tcl_Interp* interp, CompileEnv* envPtr);
+static Tcl_Size CalculateLocArrayLength(unsigned char* bytes, Tcl_Size numCommands);
+static void CalculateLocMapSizes(ByteCode* codePtr, LocMapSizes* sizes);
+static void CleanObjRefInfoTable(PostProcessInfo* locInfoPtr);
+static void CleanCompilerContext(void* clientData, Tcl_Interp* interp);
+static int CompileObject(Tcl_Interp* interp, Tcl_Obj* objPtr);
+static int CompileOneProcBody(Tcl_Interp* interp, ProcBodyInfo* infoPtr, CompilerContext* ctxPtr, CompileEnv* compEnvPtr);
+static int CompileProcBodies(Tcl_Interp* interp, CompileEnv* compEnvPtr);
+static void CreateProcBodyInfoArray(PostProcessInfo* locInfoPtr, CompileEnv* compEnvPtr, ProcBodyInfo*** arrayPtrPtr);
+static PostProcessInfo* CreatePostProcessInfo(void);
+static InstLocList* CreateInstLocList(CompileEnv* envPtr);
+static void CmpDeleteProc(void* clientData);
+static int DummyObjInterpProc(void* clientData, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[]);
+static int EmitAuxDataArray(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan);
+static int EmitByteCode(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan);
+static int EmitByteSequence(Tcl_Interp* interp, unsigned char* bytesPtr, Tcl_Size length, Tcl_Channel chan);
+static int EmitChar(Tcl_Interp* interp, int value, int separator, Tcl_Channel chan);
+static int EmitCompiledLocal(Tcl_Interp* interp, CompiledLocal* localPtr, Tcl_Channel chan);
+static int EmitCompiledObject(Tcl_Interp* interp, Tcl_Obj* objPtr, Tcl_Channel chan);
+static int EmitExcRangeArray(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan);
+static int EmitJumptableInfo(Tcl_Interp* interp, JumptableInfo* infoPtr, Tcl_Channel chan);
+static int EmitDictUpdateInfo(Tcl_Interp* interp, DictUpdateInfo* infoPtr, Tcl_Channel chan);
+static int EmitNewForeachInfo(Tcl_Interp* interp, ForeachInfo* infoPtr, Tcl_Channel chan);
+static int EmitTclSize(Tcl_Interp* interp, Tcl_Size value, int separator, Tcl_Channel chan);
+static int EmitObjArray(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan);
+static int EmitObject(Tcl_Interp* interp, Tcl_Obj* objPtr, Tcl_Channel chan);
+static int EmitProcBody(Tcl_Interp* interp, Proc* procPtr, Tcl_Channel chan);
+static int EmitScriptPostamble(Tcl_Interp* interp, Tcl_Channel chan);
+static int EmitScriptPreamble(Tcl_Interp* interp, Tcl_Channel chan);
+static int EmitSignature(Tcl_Interp* interp, Tcl_Channel chan);
+static int EmitString(Tcl_Interp* interp, char* src, Tcl_Size length, int separator, Tcl_Channel chan);
+static void FreeProcBodyInfoArray(PostProcessInfo* infoPtr);
+static void FreePostProcessInfo(PostProcessInfo* infoPtr);
+static Tcl_Size GetSharedIndex(unsigned char* pc);
+static void InitCompilerContext(Tcl_Interp* interp);
+static void InitTypes(void);
+static void LoadObjRefInfoTable(PostProcessInfo* locInfoPtr, CompileEnv* compEnvPtr);
+static void LoadProcBodyInfo(InstLocList* locInfoPtr, CompileEnv* compEnvPtr, ProcBodyInfo* infoPtr);
+static int LocalProcCompileProc(Tcl_Interp* interp, Tcl_Parse* parsePtr, Command* cmdPtr, struct CompileEnv* compEnvPtr);
+static char NameFromExcRange(ExceptionRangeType type);
+static int PostProcessCompile(Tcl_Interp* interp, struct CompileEnv* compEnvPtr, void* clientData);
+static void PrependResult(Tcl_Interp* interp, char* msgPtr);
+static void ReleaseCompilerContext(Tcl_Interp* interp);
+static int ReplacePushIndex(Tcl_Size commandIndex, unsigned char* pc, Tcl_Size newIndex, CompileEnv* compEnvPtr);
+static void ShiftByteCodes(Tcl_Size commandIndex, Tcl_Size startOffset, Tcl_Size shiftCount, CompileEnv* compEnvPtr);
+static int UnshareObject(Tcl_Size origIndex, CompileEnv* compEnvPtr);
+static void UnshareProcBodies(Tcl_Interp* interp, CompilerContext* ctxPtr, CompileEnv* compEnvPtr);
+static void UpdateByteCodes(PostProcessInfo* infoPtr, CompileEnv* compEnvPtr);
 #ifdef DEBUG_REWRITE
-static void FormatInstruction(CompileEnv* compEnvPtr, unsigned char *pc);
+static void FormatInstruction(CompileEnv* compEnvPtr, unsigned char* pc);
 #endif
 
-
 /*
  *----------------------------------------------------------------------
  *
@@ -366,27 +373,29 @@ static void FormatInstruction(CompileEnv* compEnvPtr, unsigned char *pc);
  *----------------------------------------------------------------------
  */
 
-int
-Compiler_CompileObjCmd(void *dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+int Compiler_CompileObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[])
 {
     static char argsMsg[] = "?-preamble value? inputFileName ?outputFileName?";
 
-    char *inFilePtr;
-    char *outFilePtr = NULL;
-    char *preamblePtr = NULL;
+    char* inFilePtr;
+    char* outFilePtr = NULL;
+    char* preamblePtr = NULL;
     int fileIndex = 1;
     int argCount = 2;
     Tcl_Size len;
 
     Tcl_ResetResult(interp);
 
-    if (objc < 2) {
+    if (objc < 2)
+    {
         Tcl_WrongNumArgs(interp, 1, objv, argsMsg);
         return TCL_ERROR;
     }
 
-    if (strcmp(Tcl_GetString(objv[1]), "-preamble") == 0) {
-        if (objc < 3) {
+    if (strcmp(Tcl_GetString(objv[1]), "-preamble") == 0)
+    {
+        if (objc < 3)
+        {
             Tcl_SetObjResult(interp, Tcl_NewStringObj("missing value for the -preamble flag", -1));
             return TCL_ERROR;
         }
@@ -395,7 +404,8 @@ Compiler_CompileObjCmd(void *dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const
         argCount = 4;
     }
 
-    if (objc < argCount) {
+    if (objc < argCount)
+    {
         Tcl_WrongNumArgs(interp, 1, objv, argsMsg);
         return TCL_ERROR;
     }
@@ -406,13 +416,14 @@ Compiler_CompileObjCmd(void *dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const
 
     inFilePtr = Tcl_GetStringFromObj(objv[fileIndex], &len);
 
-    if (objc > argCount) {
+    if (objc > argCount)
+    {
         outFilePtr = Tcl_GetStringFromObj(objv[fileIndex + 1], &len);
     }
 
     return Compiler_CompileFile(interp, inFilePtr, outFilePtr, preamblePtr);
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -432,14 +443,13 @@ Compiler_CompileObjCmd(void *dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const
  *----------------------------------------------------------------------
  */
 
-int
-Compiler_GetBytecodeExtensionObjCmd(void *dummy, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+int Compiler_GetBytecodeExtensionObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[])
 {
-    Tcl_Obj *objPtr = Tcl_NewStringObj(tcExtension, -1);
+    Tcl_Obj* objPtr = Tcl_NewStringObj(tcExtension, -1);
     Tcl_SetObjResult(interp, objPtr);
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -469,18 +479,17 @@ Compiler_GetBytecodeExtensionObjCmd(void *dummy, Tcl_Interp *interp, int objc, T
  *----------------------------------------------------------------------
  */
 
-int
-Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char *preamblePtr)
+int Compiler_CompileFile(Tcl_Interp* interp, char* inFilePtr, char* outFilePtr, char* preamblePtr)
 {
-    Interp *iPtr = (Interp *) interp;
+    Interp* iPtr = (Interp*)interp;
     Tcl_DString inBuffer, outBuffer;
-    char *nativeInName;
-    char *nativeOutName;
+    char* nativeInName;
+    char* nativeOutName;
     Tcl_Channel chan;
     int result;
     struct stat statBuf;
     unsigned short fileMode;
-    Tcl_Obj *cmdObjPtr;
+    Tcl_Obj* cmdObjPtr;
     LiteralTable glt; /* Save buffer for global literals */
 
     Tcl_ResetResult(interp);
@@ -489,16 +498,21 @@ Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char
     Tcl_DStringInit(&outBuffer);
 
     nativeInName = Tcl_TranslateFileName(interp, inFilePtr, &inBuffer);
-    if (nativeInName == NULL) {
+    if (nativeInName == NULL)
+    {
         goto error;
     }
 
-    if (outFilePtr == NULL) {
+    if (outFilePtr == NULL)
+    {
         nativeOutName = nativeInName;
         Tcl_DStringAppend(&outBuffer, nativeOutName, -1);
-    } else {
+    }
+    else
+    {
         nativeOutName = Tcl_TranslateFileName(interp, outFilePtr, &outBuffer);
-        if (nativeOutName == NULL) {
+        if (nativeOutName == NULL)
+        {
             goto error;
         }
     }
@@ -512,13 +526,15 @@ Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char
      * compiler should not affect the variable.
      */
 
-    if (nativeInName != Tcl_DStringValue(&inBuffer)) {
+    if (nativeInName != Tcl_DStringValue(&inBuffer))
+    {
         Tcl_DStringSetLength(&inBuffer, 0);
         Tcl_DStringAppend(&inBuffer, nativeInName, -1);
         nativeInName = Tcl_DStringValue(&inBuffer);
     }
 
-    if (nativeOutName != Tcl_DStringValue(&outBuffer)) {
+    if (nativeOutName != Tcl_DStringValue(&outBuffer))
+    {
         Tcl_DStringSetLength(&outBuffer, 0);
         Tcl_DStringAppend(&outBuffer, nativeOutName, -1);
         nativeOutName = Tcl_DStringValue(&outBuffer);
@@ -528,16 +544,19 @@ Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char
      * If the outFilePtr argument was a NULL, then we must replace the
      * extension for its current value, because its current value is inFilePtr.
      */
-    if (outFilePtr == NULL) {
-        const char *extension = TclGetExtension(nativeOutName);
-        if (extension != NULL) {
+    if (outFilePtr == NULL)
+    {
+        const char* extension = TclGetExtension(nativeOutName);
+        if (extension != NULL)
+        {
             Tcl_DStringSetLength(&outBuffer, (Tcl_DStringLength(&outBuffer) - strlen(extension)));
         }
         Tcl_DStringAppend(&outBuffer, tcExtension, -1);
         nativeOutName = Tcl_DStringValue(&outBuffer);
     }
 
-    if (stat(nativeInName, &statBuf) == -1) {
+    if (stat(nativeInName, &statBuf) == -1)
+    {
         Tcl_SetErrno(errno);
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("couldn't read file \"%s\": %s", inFilePtr, Tcl_PosixError(interp)));
         goto error;
@@ -545,19 +564,22 @@ Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char
     fileMode = statBuf.st_mode & ACCESSPERMS;
 
     chan = Tcl_OpenFileChannel(interp, nativeInName, "r", 0644);
-    if (chan == (Tcl_Channel) NULL) {
+    if (chan == (Tcl_Channel)NULL)
+    {
         Tcl_ResetResult(interp);
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("couldn't read file \"%s\": %s", inFilePtr, Tcl_PosixError(interp)));
         goto error;
     }
     cmdObjPtr = Tcl_NewObj();
     result = Tcl_ReadChars(chan, cmdObjPtr, -1, 0);
-    if (result < 0) {
+    if (result < 0)
+    {
         Tcl_Close(interp, chan);
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("couldn't read file \"%s\": %s", inFilePtr, Tcl_PosixError(interp)));
         goto error;
     }
-    if (Tcl_Close(interp, chan) != TCL_OK) {
+    if (Tcl_Close(interp, chan) != TCL_OK)
+    {
         goto error;
     }
 
@@ -567,28 +589,31 @@ Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char
      * running the compiler and compiler itself.
      */
 
-    memcpy (&glt, &iPtr->literalTable, sizeof(LiteralTable));
+    memcpy(&glt, &iPtr->literalTable, sizeof(LiteralTable));
 
     /* Inlined copy of "TclInitLiteralTable (&iPtr->literalTable);"
      * This function is not in the stub table of Tcl, not even in
      * the internal one. This causes link problems.
      */
 
-#define REBUILD_MULTIPLIER  3
+#define REBUILD_MULTIPLIER 3
 
     iPtr->literalTable.buckets = iPtr->literalTable.staticBuckets;
     iPtr->literalTable.staticBuckets[0] = iPtr->literalTable.staticBuckets[1] = 0;
     iPtr->literalTable.staticBuckets[2] = iPtr->literalTable.staticBuckets[3] = 0;
     iPtr->literalTable.numBuckets = TCL_SMALL_HASH_TABLE;
     iPtr->literalTable.numEntries = 0;
-    iPtr->literalTable.rebuildSize = TCL_SMALL_HASH_TABLE*REBUILD_MULTIPLIER;
+    iPtr->literalTable.rebuildSize = TCL_SMALL_HASH_TABLE * REBUILD_MULTIPLIER;
     iPtr->literalTable.mask = 3;
 
     Tcl_IncrRefCount(cmdObjPtr);
     result = Compiler_CompileObj(interp, cmdObjPtr);
-    if (result == TCL_RETURN) {
+    if (result == TCL_RETURN)
+    {
         result = TclUpdateReturnInfo(iPtr);
-    } else if (result == TCL_ERROR) {
+    }
+    else if (result == TCL_ERROR)
+    {
         char msg[200];
 
         /*
@@ -597,27 +622,37 @@ Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char
 
         sprintf(msg, "\n    (file \"%.150s\" line %d)", inFilePtr, Tcl_GetErrorLine(interp));
         Tcl_AppendObjToErrorInfo(interp, Tcl_NewStringObj(msg, -1));
-    } else {
+    }
+    else
+    {
         chan = Tcl_OpenFileChannel(interp, nativeOutName, "w", fileMode);
-        if (chan == (Tcl_Channel) NULL) {
+        if (chan == (Tcl_Channel)NULL)
+        {
             Tcl_ResetResult(interp);
-            Tcl_SetObjResult(interp, Tcl_ObjPrintf("couldn't create output file \"%s\": %s", nativeOutName, Tcl_PosixError(interp)));
+            Tcl_SetObjResult(interp,
+                             Tcl_ObjPrintf("couldn't create output file \"%s\": %s", nativeOutName, Tcl_PosixError(interp)));
             result = TCL_ERROR;
-        } else {
+        }
+        else
+        {
             result = TCL_OK;
-            if (preamblePtr) {
+            if (preamblePtr)
+            {
                 result = EmitString(interp, preamblePtr, -1, '\n', chan);
             }
-            if (result == TCL_OK) {
+            if (result == TCL_OK)
+            {
                 result = EmitCompiledObject(interp, cmdObjPtr, chan);
             }
-            if (Tcl_Close(interp, chan) != TCL_OK) {
+            if (Tcl_Close(interp, chan) != TCL_OK)
+            {
                 Tcl_SetObjResult(interp, Tcl_ObjPrintf("error closing bytecode stream: %s", Tcl_PosixError(interp)));
                 result = TCL_ERROR;
             }
         }
     }
-    if (result != TCL_ERROR) {
+    if (result != TCL_ERROR)
+    {
         /*
          * If an error was returned, the previous internal rep may
          * already be freed, and this can cause crash conditions.
@@ -632,20 +667,20 @@ Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char
      */
 
     /* ** TclDeleteLiteralTable (interp,&iPtr->literalTable); ** */
-    memcpy (&iPtr->literalTable, &glt, sizeof(LiteralTable));
+    memcpy(&iPtr->literalTable, &glt, sizeof(LiteralTable));
 
     Tcl_DStringFree(&inBuffer);
     Tcl_DStringFree(&outBuffer);
 
     return result;
 
- error:
+error:
     Tcl_DStringFree(&inBuffer);
     Tcl_DStringFree(&outBuffer);
 
     return TCL_ERROR;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -669,21 +704,20 @@ Compiler_CompileFile(Tcl_Interp *interp, char *inFilePtr, char *outFilePtr, char
  *----------------------------------------------------------------------
  */
 
-int
-Compiler_CompileObj(Tcl_Interp *interp, Tcl_Obj *objPtr)
+int Compiler_CompileObj(Tcl_Interp* interp, Tcl_Obj* objPtr)
 {
-    Interp *iPtr = (Interp *) interp;
-    ByteCode* codePtr;      /* Tcl Internal type of bytecode. */
+    Interp* iPtr = (Interp*)interp;
     int result = TCL_OK;
 
     /*
      * If the interpreter has been deleted, return an error.
      */
 
-    if (iPtr->flags & DELETED) {
+    if (iPtr->flags & DELETED)
+    {
         Tcl_ResetResult(interp);
         Tcl_AppendToObj(Tcl_GetObjResult(interp), "attempt to call compile in deleted interpreter", -1);
-        Tcl_SetErrorCode(interp, "COMPILER", "COMPILE", "attempt to call compile in deleted interpreter", (char *) NULL);
+        Tcl_SetErrorCode(interp, "COMPILER", "COMPILE", "attempt to call compile in deleted interpreter", (char*)NULL);
         return TCL_ERROR;
     }
 
@@ -692,33 +726,27 @@ Compiler_CompileObj(Tcl_Interp *interp, Tcl_Obj *objPtr)
      * compiled. However, we do not attempt to recompile an object that had
      * been generated from a compiled script.
      */
-
-    if (objPtr->typePtr == cmpByteCodeType) {
-        codePtr = (ByteCode *) objPtr->internalRep.otherValuePtr;
-
-        if (codePtr->flags & TCL_BYTECODE_PRECOMPILED) {
+    const Tcl_ObjInternalRep* ir = Tcl_FetchInternalRep(objPtr, cmpByteCodeType);
+    if (ir)
+    {
+        ByteCode* codePtr = (ByteCode*)ir->twoPtrValue.ptr1;
+        if (codePtr->flags & TCL_BYTECODE_PRECOMPILED)
             return TCL_OK;
-        }
-
-        cmpByteCodeType->freeIntRepProc(objPtr);
-        objPtr->typePtr = (Tcl_ObjType *) NULL;
+        Tcl_FreeInternalRep(objPtr);
+        ir = NULL;
     }
-    if (objPtr->typePtr != cmpByteCodeType) {
-        /*
-         * First reset any error line number information.
-         */
-
-#if (TCL_MAJOR_VERSION == 8) && (TCL_MINOR_VERSION < 6)
-        iPtr->errorLine = 1;   /* no correct line # information yet */
-#else
+    if (!ir)
+    {
         Tcl_SetErrorLine(interp, 1);
-#endif
-        result = CompileObject(interp, objPtr);
+        if (CompileObject(interp, objPtr) != TCL_OK)
+            return TCL_ERROR;
+        if (Tcl_ConvertToType(interp, objPtr, cmpByteCodeType) != TCL_OK)
+            return TCL_ERROR;
     }
 
     return result;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -741,31 +769,33 @@ Compiler_CompileObj(Tcl_Interp *interp, Tcl_Obj *objPtr)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitCompiledObject(Tcl_Interp *interp, Tcl_Obj *objPtr, Tcl_Channel chan)
+static int EmitCompiledObject(Tcl_Interp* interp, Tcl_Obj* objPtr, Tcl_Channel chan)
 {
-    if ((EmitScriptPreamble(interp, chan) != TCL_OK)
-        || (EmitSignature(interp, chan) != TCL_OK)) {
+    if ((EmitScriptPreamble(interp, chan) != TCL_OK) || (EmitSignature(interp, chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 
-    if (EmitByteCode(interp, (ByteCode *) objPtr->internalRep.otherValuePtr, chan) != TCL_OK) {
+    if (EmitByteCode(interp, (ByteCode*)objPtr->internalRep.otherValuePtr, chan) != TCL_OK)
+    {
         PrependResult(interp, "error writing bytecode stream: ");
         return TCL_ERROR;
     }
 
-    if (EmitScriptPostamble(interp, chan) != TCL_OK) {
+    if (EmitScriptPostamble(interp, chan) != TCL_OK)
+    {
         return TCL_ERROR;
     }
 
-    if (Tcl_Flush(chan) != TCL_OK) {
+    if (Tcl_Flush(chan) != TCL_OK)
+    {
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("error flushing bytecode stream: Tcl_Flush: %s", Tcl_PosixError(interp)));
         return TCL_ERROR;
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -787,8 +817,7 @@ EmitCompiledObject(Tcl_Interp *interp, Tcl_Obj *objPtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitByteCode(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
+static int EmitByteCode(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan)
 {
     LocMapSizes locMapSizes;
 
@@ -801,30 +830,32 @@ EmitByteCode(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
 
     CalculateLocMapSizes(codePtr, &locMapSizes);
 
-    if ((EmitTclSize(interp, codePtr->numCommands, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, 0, ' ', chan) != TCL_OK) /* numSrcChars */
-        || (EmitTclSize(interp, codePtr->numCodeBytes, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, codePtr->numLitObjects, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, codePtr->numExceptRanges, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, codePtr->numAuxDataItems, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, codePtr->numCmdLocBytes, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, codePtr->maxExceptDepth, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, codePtr->maxStackDepth, ' ', chan) != TCL_OK)) {
+    if ((EmitTclSize(interp, codePtr->numCommands, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, 0, ' ', chan) != TCL_OK) /* numSrcChars */
+        || (EmitTclSize(interp, codePtr->numCodeBytes, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, codePtr->numLitObjects, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, codePtr->numExceptRanges, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, codePtr->numAuxDataItems, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, codePtr->numCmdLocBytes, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, codePtr->maxExceptDepth, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, codePtr->maxStackDepth, ' ', chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 
 #if EMIT_SRCMAP
-    if ((EmitTclSize(interp, locMapSizes.codeDeltaSize, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, locMapSizes.codeLengthSize, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, locMapSizes.srcDeltaSize, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, locMapSizes.srcLengthSize, '\n', chan) != TCL_OK)) {
+    if ((EmitTclSize(interp, locMapSizes.codeDeltaSize, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, locMapSizes.codeLengthSize, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, locMapSizes.srcDeltaSize, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, locMapSizes.srcLengthSize, '\n', chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 #else
-    if ((EmitTclSize(interp, locMapSizes.codeDeltaSize, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, locMapSizes.codeLengthSize, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, -1, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, -1, '\n', chan) != TCL_OK)) {
+    if ((EmitTclSize(interp, locMapSizes.codeDeltaSize, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, locMapSizes.codeLengthSize, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, -1, ' ', chan) != TCL_OK) || (EmitTclSize(interp, -1, '\n', chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 #endif
@@ -833,17 +864,20 @@ EmitByteCode(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
      * The byte code dumps
      */
 
-    if (EmitByteSequence(interp, codePtr->codeStart, codePtr->numCodeBytes, chan) != TCL_OK) {
+    if (EmitByteSequence(interp, codePtr->codeStart, codePtr->numCodeBytes, chan) != TCL_OK)
+    {
         return TCL_ERROR;
     }
 
-    if ((EmitByteSequence(interp, codePtr->codeDeltaStart, locMapSizes.codeDeltaSize, chan) != TCL_OK)
-        || (EmitByteSequence(interp, codePtr->codeLengthStart, locMapSizes.codeLengthSize, chan) != TCL_OK)) {
+    if ((EmitByteSequence(interp, codePtr->codeDeltaStart, locMapSizes.codeDeltaSize, chan) != TCL_OK) ||
+        (EmitByteSequence(interp, codePtr->codeLengthStart, locMapSizes.codeLengthSize, chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 #if EMIT_SRCMAP
-    if ((EmitByteSequence(interp, codePtr->srcDeltaStart, locMapSizes.srcDeltaSize, chan) != TCL_OK)
-        || (EmitByteSequence(interp, codePtr->srcLengthStart, locMapSizes.srcLengthSize, chan) != TCL_OK)) {
+    if ((EmitByteSequence(interp, codePtr->srcDeltaStart, locMapSizes.srcDeltaSize, chan) != TCL_OK) ||
+        (EmitByteSequence(interp, codePtr->srcLengthStart, locMapSizes.srcLengthSize, chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 #endif
@@ -852,15 +886,15 @@ EmitByteCode(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
      * the support arrays
      */
 
-    if ((EmitObjArray(interp, codePtr, chan) != TCL_OK)
-        || (EmitExcRangeArray(interp, codePtr, chan) != TCL_OK)
-        || (EmitAuxDataArray(interp, codePtr, chan) != TCL_OK)) {
+    if ((EmitObjArray(interp, codePtr, chan) != TCL_OK) || (EmitExcRangeArray(interp, codePtr, chan) != TCL_OK) ||
+        (EmitAuxDataArray(interp, codePtr, chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -879,21 +913,21 @@ EmitByteCode(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitChar(Tcl_Interp *interp, int value, int separator, Tcl_Channel chan)
+static int EmitChar(Tcl_Interp* interp, int value, int separator, Tcl_Channel chan)
 {
     char buf[2];
 
     buf[0] = value;
     buf[1] = separator;
-    if (Tcl_Write(chan, buf, 2) < 0) {
+    if (Tcl_Write(chan, buf, 2) < 0)
+    {
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("Tcl_Write: %s", Tcl_PosixError(interp)));
         return TCL_ERROR;
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -912,20 +946,18 @@ EmitChar(Tcl_Interp *interp, int value, int separator, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitTclSize(Tcl_Interp *interp, Tcl_Size value, int separator, Tcl_Channel chan)
+static int EmitTclSize(Tcl_Interp* interp, Tcl_Size value, int separator, Tcl_Channel chan)
 {
-    /* Format value + separator into a Tcl_Obj using the size modifier */
-    Tcl_Obj *out = Tcl_ObjPrintf("%" TCL_SIZE_MODIFIER "d%c", value, separator);
-
-    if (Tcl_WriteObj(chan, out) < 0) {
-        Tcl_SetObjResult(interp,
-            Tcl_ObjPrintf("Tcl_WriteObj: %s", Tcl_PosixError(interp)));
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "%" TCL_SIZE_MODIFIER "d%c", value, (char)separator);
+    if (n < 0 || Tcl_Write(chan, buf, n) < 0)
+    {
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf("Tcl_WriteObj: %s", Tcl_PosixError(interp)));
         return TCL_ERROR;
     }
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -945,29 +977,29 @@ EmitTclSize(Tcl_Interp *interp, Tcl_Size value, int separator, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitString(Tcl_Interp *interp, char *src, Tcl_Size length, int separator, Tcl_Channel chan)
+static int EmitString(Tcl_Interp* interp, char* src, Tcl_Size length, int separator, Tcl_Channel chan)
 {
-    char buf[4];
-
-    if (length < 0) {
+    if (length < 0)
+    {
         length = strlen(src);
     }
 
-    if ((length > 0) && (Tcl_Write(chan, src, length) < 0)) {
+    if ((length > 0) && (Tcl_Write(chan, src, length) < 0))
+    {
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("Tcl_Write: %s", Tcl_PosixError(interp)));
         return TCL_ERROR;
     }
 
-    sprintf(buf, "%c", separator);
-    if (Tcl_Write(chan, buf, strlen(buf)) < 0) {
+    const char c = (char)separator;
+    if (Tcl_Write(chan, &c, 1) < 0)
+    {
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("Tcl_Write: %s", Tcl_PosixError(interp)));
         return TCL_ERROR;
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -998,24 +1030,27 @@ EmitString(Tcl_Interp *interp, char *src, Tcl_Size length, int separator, Tcl_Ch
  *----------------------------------------------------------------------
  */
 
-static int
-EmitByteSequence(Tcl_Interp *interp, unsigned char *bytesPtr, Tcl_Size length, Tcl_Channel chan)
+static int EmitByteSequence(Tcl_Interp* interp, unsigned char* bytesPtr, Tcl_Size length, Tcl_Channel chan)
 {
     A85EncodeContext encodeCtx;
     unsigned char bytes[4];
     Tcl_Size numBytes = 0;
 
-    if (EmitTclSize(interp, length, '\n', chan) != TCL_OK) {
+    if (EmitTclSize(interp, length, '\n', chan) != TCL_OK)
+    {
         return TCL_ERROR;
     }
 
     A85InitEncodeContext(chan, '\n', &encodeCtx);
 
-    while (length > 0) {
+    while (length > 0)
+    {
         bytes[numBytes] = *bytesPtr;
 
-        if (numBytes == 3) {
-            if (A85EncodeBytes(interp, bytes, 4, &encodeCtx) != TCL_OK) {
+        if (numBytes == 3)
+        {
+            if (A85EncodeBytes(interp, bytes, 4, &encodeCtx) != TCL_OK)
+            {
                 return TCL_ERROR;
             }
             numBytes = -1;
@@ -1026,13 +1061,14 @@ EmitByteSequence(Tcl_Interp *interp, unsigned char *bytesPtr, Tcl_Size length, T
         length -= 1;
     }
 
-    if ((numBytes != 0) && (A85EncodeBytes(interp, bytes, numBytes, &encodeCtx) != TCL_OK)) {
+    if ((numBytes != 0) && (A85EncodeBytes(interp, bytes, numBytes, &encodeCtx) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 
     return A85Flush(interp, &encodeCtx);
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1052,8 +1088,7 @@ EmitByteSequence(Tcl_Interp *interp, unsigned char *bytesPtr, Tcl_Size length, T
  *
  *----------------------------------------------------------------------
  */
-static void
-CalculateLocMapSizes(ByteCode *codePtr, LocMapSizes *sizes)
+static void CalculateLocMapSizes(ByteCode* codePtr, LocMapSizes* sizes)
 {
     /*
      * EMIL for all but the last, we could do sanity checking by using
@@ -1065,7 +1100,7 @@ CalculateLocMapSizes(ByteCode *codePtr, LocMapSizes *sizes)
     sizes->srcDeltaSize = CalculateLocArrayLength(codePtr->srcDeltaStart, codePtr->numCommands);
     sizes->srcLengthSize = CalculateLocArrayLength(codePtr->srcLengthStart, codePtr->numCommands);
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1083,8 +1118,7 @@ CalculateLocMapSizes(ByteCode *codePtr, LocMapSizes *sizes)
  *----------------------------------------------------------------------
  */
 
-static Tcl_Size
-CalculateLocArrayLength (unsigned char* bytes, Tcl_Size numCommands)
+static Tcl_Size CalculateLocArrayLength(unsigned char* bytes, Tcl_Size numCommands)
 {
     int i, length = 0;
 
@@ -1093,11 +1127,15 @@ CalculateLocArrayLength (unsigned char* bytes, Tcl_Size numCommands)
      * preceded by the 0xff tag
      */
 
-    for (i=0; i < numCommands; i++) {
-        if (*bytes == 0xff) {
+    for (i = 0; i < numCommands; i++)
+    {
+        if (*bytes == 0xff)
+        {
             length += 5;
             bytes += 5;
-        } else {
+        }
+        else
+        {
             length += 1;
             bytes += 1;
         }
@@ -1105,7 +1143,7 @@ CalculateLocArrayLength (unsigned char* bytes, Tcl_Size numCommands)
 
     return length;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1122,27 +1160,29 @@ CalculateLocArrayLength (unsigned char* bytes, Tcl_Size numCommands)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitObjArray(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
+static int EmitObjArray(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan)
 {
     int result;
     Tcl_Size i, numLitObjects = codePtr->numLitObjects;
-    Tcl_Obj **objArrayPtr = &codePtr->objArrayPtr[0];
+    Tcl_Obj** objArrayPtr = &codePtr->objArrayPtr[0];
 
-    if (EmitTclSize(interp, numLitObjects, '\n', chan) != TCL_OK) {
+    if (EmitTclSize(interp, numLitObjects, '\n', chan) != TCL_OK)
+    {
         return TCL_ERROR;
     }
 
-    for (i=0; i < numLitObjects; i++) {
+    for (i = 0; i < numLitObjects; i++)
+    {
         result = EmitObject(interp, objArrayPtr[i], chan);
-        if (result != TCL_OK) {
+        if (result != TCL_OK)
+        {
             return result;
         }
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1159,53 +1199,67 @@ EmitObjArray(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitObject(Tcl_Interp *interp, Tcl_Obj* objPtr, Tcl_Channel chan)
+static int EmitObject(Tcl_Interp* interp, Tcl_Obj* objPtr, Tcl_Channel chan)
 {
-    const Tcl_ObjType *objTypePtr;
-    char *objBytes;
+    const Tcl_ObjType* objTypePtr;
+    char* objBytes;
     Tcl_Size objLength;
     char typeCode = CMP_STRING_CODE;
     int emitCount = 1;
 
     objTypePtr = objPtr->typePtr;
     objBytes = Tcl_GetStringFromObj(objPtr, &objLength);
-    if (!objBytes) {
+    if (!objBytes)
+    {
         objBytes = "";
         objLength = 0;
     }
 
-    if (objTypePtr == cmpIntType) {
+    if (objTypePtr == cmpIntType)
+    {
         typeCode = CMP_INT_CODE;
         emitCount = 0;
-    } else if (objTypePtr == cmpDoubleType) {
+    }
+    else if (objTypePtr == cmpDoubleType)
+    {
         typeCode = CMP_DOUBLE_CODE;
         emitCount = 0;
-    } else if (objTypePtr == cmpByteCodeType) {
-        if (EmitChar(interp, CMP_BYTECODE_CODE, '\n', chan) != TCL_OK) {
-            return TCL_ERROR;
-        }
-        return EmitByteCode(interp, (ByteCode *) objPtr->internalRep.otherValuePtr, chan);
-    } else if (objTypePtr == cmpProcBodyType) {
-        if (EmitChar(interp, CMP_PROCBODY_CODE, '\n', chan) != TCL_OK) {
-            return TCL_ERROR;
-        }
-        return EmitProcBody(interp, (Proc *) objPtr->internalRep.otherValuePtr, chan);
-    } else {
-        if (EmitChar(interp, CMP_XSTRING_CODE, '\n', chan) != TCL_OK) {
-            return TCL_ERROR;
-        }
-        return EmitByteSequence(interp, (unsigned char *) objBytes, objLength, chan);
     }
-    if (EmitChar(interp, typeCode, '\n', chan) != TCL_OK) {
+    else if (objTypePtr == cmpByteCodeType)
+    {
+        if (EmitChar(interp, CMP_BYTECODE_CODE, '\n', chan) != TCL_OK)
+        {
+            return TCL_ERROR;
+        }
+        return EmitByteCode(interp, (ByteCode*)objPtr->internalRep.otherValuePtr, chan);
+    }
+    else if (objTypePtr == cmpProcBodyType)
+    {
+        if (EmitChar(interp, CMP_PROCBODY_CODE, '\n', chan) != TCL_OK)
+        {
+            return TCL_ERROR;
+        }
+        return EmitProcBody(interp, (Proc*)objPtr->internalRep.otherValuePtr, chan);
+    }
+    else
+    {
+        if (EmitChar(interp, CMP_XSTRING_CODE, '\n', chan) != TCL_OK)
+        {
+            return TCL_ERROR;
+        }
+        return EmitByteSequence(interp, (unsigned char*)objBytes, objLength, chan);
+    }
+    if (EmitChar(interp, typeCode, '\n', chan) != TCL_OK)
+    {
         return TCL_ERROR;
     }
-    if (emitCount && (EmitTclSize(interp, objLength, '\n', chan) != TCL_OK)) {
+    if (emitCount && (EmitTclSize(interp, objLength, '\n', chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
     return EmitString(interp, objBytes, objLength, '\n', chan);
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1222,30 +1276,33 @@ EmitObject(Tcl_Interp *interp, Tcl_Obj* objPtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitExcRangeArray(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
+static int EmitExcRangeArray(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan)
 {
     Tcl_Size i, numExceptRanges = codePtr->numExceptRanges;
-    ExceptionRange *excArrayPtr = codePtr->exceptArrayPtr;
+    ExceptionRange* excArrayPtr = codePtr->exceptArrayPtr;
     char excName;
 
-    if (EmitTclSize(interp, numExceptRanges, '\n', chan) != TCL_OK) {
+    if (EmitTclSize(interp, numExceptRanges, '\n', chan) != TCL_OK)
+    {
         return TCL_ERROR;
     }
 
-    for (i=0; i < numExceptRanges; i++) {
+    for (i = 0; i < numExceptRanges; i++)
+    {
         excName = NameFromExcRange(excArrayPtr->type);
-        if (excName == '\0') {
+        if (excName == '\0')
+        {
             return -1;
         }
 
-        if ((EmitChar(interp, excName, ' ', chan) != TCL_OK)
-            || (EmitTclSize(interp, excArrayPtr->nestingLevel, ' ', chan)   != TCL_OK)
-            || (EmitTclSize(interp, excArrayPtr->codeOffset, ' ', chan)     != TCL_OK)
-            || (EmitTclSize(interp, excArrayPtr->numCodeBytes, ' ', chan)   != TCL_OK)
-            || (EmitTclSize(interp, excArrayPtr->breakOffset, ' ', chan)    != TCL_OK)
-            || (EmitTclSize(interp, excArrayPtr->continueOffset, ' ', chan) != TCL_OK)
-            || (EmitTclSize(interp, excArrayPtr->catchOffset, '\n', chan)   != TCL_OK)) {
+        if ((EmitChar(interp, excName, ' ', chan) != TCL_OK) ||
+            (EmitTclSize(interp, excArrayPtr->nestingLevel, ' ', chan) != TCL_OK) ||
+            (EmitTclSize(interp, excArrayPtr->codeOffset, ' ', chan) != TCL_OK) ||
+            (EmitTclSize(interp, excArrayPtr->numCodeBytes, ' ', chan) != TCL_OK) ||
+            (EmitTclSize(interp, excArrayPtr->breakOffset, ' ', chan) != TCL_OK) ||
+            (EmitTclSize(interp, excArrayPtr->continueOffset, ' ', chan) != TCL_OK) ||
+            (EmitTclSize(interp, excArrayPtr->catchOffset, '\n', chan) != TCL_OK))
+        {
             return TCL_ERROR;
         }
 
@@ -1254,7 +1311,7 @@ EmitExcRangeArray(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1271,58 +1328,72 @@ EmitExcRangeArray(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitAuxDataArray(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
+static int EmitAuxDataArray(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan)
 {
     int result;
     Tcl_Size i, numAuxDataItems = codePtr->numAuxDataItems;
-    AuxData *auxDataPtr = codePtr->auxDataArrayPtr;
-    const AuxDataType *typePtr;
+    AuxData* auxDataPtr = codePtr->auxDataArrayPtr;
+    const AuxDataType* typePtr;
 
-    if (EmitTclSize(interp, numAuxDataItems, '\n', chan) != TCL_OK) {
+    if (EmitTclSize(interp, numAuxDataItems, '\n', chan) != TCL_OK)
+    {
         return TCL_ERROR;
     }
 
-    for (i=0; i < numAuxDataItems; i++) {
+    for (i = 0; i < numAuxDataItems; i++)
+    {
         /*
          * write out the type, then switch based on the AuxData type
          */
         typePtr = auxDataPtr->type;
-        if (typePtr == cmpJumptableInfoType) {
+        if (typePtr == cmpJumptableInfoType)
+        {
             result = EmitChar(interp, CMP_JUMPTABLE_INFO, '\n', chan);
-            if (result != TCL_OK) {
+            if (result != TCL_OK)
+            {
                 return result;
             }
-            result = EmitJumptableInfo(interp, (JumptableInfo *) auxDataPtr->clientData, chan);
-            if (result != TCL_OK) {
+            result = EmitJumptableInfo(interp, (JumptableInfo*)auxDataPtr->clientData, chan);
+            if (result != TCL_OK)
+            {
                 return result;
             }
-        } else if (typePtr == cmpDictUpdateInfoType) {
+        }
+        else if (typePtr == cmpDictUpdateInfoType)
+        {
             result = EmitChar(interp, CMP_DICTUPDATE_INFO, '\n', chan);
-            if (result != TCL_OK) {
+            if (result != TCL_OK)
+            {
                 return result;
             }
-            result = EmitDictUpdateInfo(interp, (DictUpdateInfo *) auxDataPtr->clientData, chan);
-            if (result != TCL_OK) {
+            result = EmitDictUpdateInfo(interp, (DictUpdateInfo*)auxDataPtr->clientData, chan);
+            if (result != TCL_OK)
+            {
                 return result;
             }
-        } else if (typePtr == cmpNewForeachInfoType) {
+        }
+        else if (typePtr == cmpNewForeachInfoType)
+        {
             result = EmitChar(interp, CMP_NEW_FOREACH_INFO, '\n', chan);
-            if (result != TCL_OK) {
+            if (result != TCL_OK)
+            {
                 return result;
             }
-            result = EmitNewForeachInfo(interp, (ForeachInfo *) auxDataPtr->clientData, chan);
-            if (result != TCL_OK) {
+            result = EmitNewForeachInfo(interp, (ForeachInfo*)auxDataPtr->clientData, chan);
+            if (result != TCL_OK)
+            {
                 return result;
             }
-        } else {
+        }
+        else
+        {
             Tcl_Panic("EmitAuxDataArray: unknown AuxType \"%s\"", typePtr->name);
         }
         auxDataPtr += 1;
     }
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1340,19 +1411,18 @@ EmitAuxDataArray(Tcl_Interp *interp, ByteCode *codePtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitSignature(Tcl_Interp *interp, Tcl_Channel chan)
+static int EmitSignature(Tcl_Interp* interp, Tcl_Channel chan)
 {
-    if ((EmitString(interp, signatureHeader, -1, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, formatVersion, ' ', chan) != TCL_OK)
-        || (EmitString(interp, CMP_VERSION, -1, ' ', chan) != TCL_OK)
-        || (EmitString(interp, TCL_VERSION, -1, '\n', chan) != TCL_OK)) {
+    if ((EmitString(interp, signatureHeader, -1, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, formatVersion, ' ', chan) != TCL_OK) || (EmitString(interp, CMP_VERSION, -1, ' ', chan) != TCL_OK) ||
+        (EmitString(interp, TCL_VERSION, -1, '\n', chan) != TCL_OK))
+    {
         PrependResult(interp, "error writing signature: ");
         return TCL_ERROR;
     }
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1370,20 +1440,21 @@ EmitSignature(Tcl_Interp *interp, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static char
-NameFromExcRange(ExceptionRangeType type)
+static char NameFromExcRange(ExceptionRangeType type)
 {
-    const ExcRangeMap *mapPtr;
+    const ExcRangeMap* mapPtr;
 
-    for (mapPtr=&excRangeMap[0]; mapPtr->name != 0; mapPtr++) {
-        if (mapPtr->type == type) {
+    for (mapPtr = &excRangeMap[0]; mapPtr->name != 0; mapPtr++)
+    {
+        if (mapPtr->type == type)
+        {
             return mapPtr->name;
         }
     }
 
     return '\0';
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1401,45 +1472,51 @@ NameFromExcRange(ExceptionRangeType type)
  *----------------------------------------------------------------------
  */
 
-static void
-InitTypes()
+static void InitTypes()
 {
-    if (didLoadTypes == 0) {
+    if (didLoadTypes == 0)
+    {
         cmpProcBodyType = Tcl_GetObjType("procbody");
-        if (!cmpProcBodyType) {
+        if (!cmpProcBodyType)
+        {
             Tcl_Panic("InitTypes: failed to find the procbody type");
         }
 
         cmpByteCodeType = Tcl_GetObjType("bytecode");
-        if (!cmpByteCodeType) {
+        if (!cmpByteCodeType)
+        {
             Tcl_Panic("InitTypes: failed to find the bytecode type");
         }
 
         cmpDoubleType = Tcl_GetObjType("double");
-        if (!cmpByteCodeType) {
+        if (!cmpByteCodeType)
+        {
             Tcl_Panic("InitTypes: failed to find the double type");
         }
 
-        Tcl_Obj *obj = Tcl_NewIntObj(0);
+        Tcl_Obj* obj = Tcl_NewIntObj(0);
         cmpIntType = obj->typePtr;
         Tcl_DecrRefCount(obj);
 
         cmpJumptableInfoType = TclGetAuxDataType("JumptableInfo");
-        if (!cmpJumptableInfoType) {
+        if (!cmpJumptableInfoType)
+        {
             Tcl_Panic("InitTypes: failed to find the JumptableInfo AuxData type");
         }
         cmpDictUpdateInfoType = TclGetAuxDataType("DictUpdateInfo");
-        if (!cmpDictUpdateInfoType) {
+        if (!cmpDictUpdateInfoType)
+        {
             Tcl_Panic("InitTypes: failed to find the DictUpdateInfo AuxData type");
         }
         cmpNewForeachInfoType = TclGetAuxDataType("NewForeachInfo");
-        if (!cmpNewForeachInfoType) {
+        if (!cmpNewForeachInfoType)
+        {
             Tcl_Panic("InitTypes: failed to find the NewForeachInfo AuxData type");
         }
         didLoadTypes = 1;
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1457,11 +1534,10 @@ InitTypes()
  *----------------------------------------------------------------------
  */
 
-static void
-PrependResult(Tcl_Interp *interp, char *msgPtr)
+static void PrependResult(Tcl_Interp* interp, char* msgPtr)
 {
     Tcl_DString buf;
-    Tcl_Obj *resultPtr = Tcl_GetObjResult(interp);
+    Tcl_Obj* resultPtr = Tcl_GetObjResult(interp);
 
     Tcl_DStringInit(&buf);
     Tcl_DStringAppend(&buf, msgPtr, -1);
@@ -1470,7 +1546,7 @@ PrependResult(Tcl_Interp *interp, char *msgPtr)
     resultPtr = Tcl_NewStringObj(Tcl_DStringValue(&buf), Tcl_DStringLength(&buf));
     Tcl_SetObjResult(interp, resultPtr);
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1488,13 +1564,12 @@ PrependResult(Tcl_Interp *interp, char *msgPtr)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitScriptPreamble(Tcl_Interp *interp, Tcl_Channel chan)
+static int EmitScriptPreamble(Tcl_Interp* interp, Tcl_Channel chan)
 {
     char buf[256];
-    char *errMsgPtr;
+    char* errMsgPtr;
     int result = TCL_OK;
-    Tcl_Obj *errObjPtr = 0;
+    Tcl_Obj* errObjPtr = 0;
 
     /*
      * Extract the loader error message from the package itself, and if not
@@ -1503,32 +1578,37 @@ EmitScriptPreamble(Tcl_Interp *interp, Tcl_Channel chan)
      */
 
     sprintf(buf, "variable %s; set %s", errorVariable, errorVariable);
-    Tcl_Obj *script = Tcl_NewStringObj(buf, -1);
+    Tcl_Obj* script = Tcl_NewStringObj(buf, -1);
     Tcl_IncrRefCount(script);
     int _rc = Tcl_EvalObjEx(interp, script, 0);
     Tcl_DecrRefCount(script);
-    if (_rc != TCL_OK) {
+    if (_rc != TCL_OK)
+    {
         errMsgPtr = errorMessage;
-    } else {
-        Tcl_Obj *errObjPtr = Tcl_GetObjResult(interp);
+    }
+    else
+    {
+        Tcl_Obj* errObjPtr = Tcl_GetObjResult(interp);
         Tcl_IncrRefCount(errObjPtr);
         errMsgPtr = errObjPtr->bytes;
     }
 
     sprintf(buf, preambleFormat, loaderName, loaderVersion, errMsgPtr, loaderName, evalCommand);
-    if (EmitString(interp, buf, -1, '\n', chan) != TCL_OK) {
+    if (EmitString(interp, buf, -1, '\n', chan) != TCL_OK)
+    {
         PrependResult(interp, "error writing script preamble: ");
         result = TCL_ERROR;
     }
 
-    if (errObjPtr) {
+    if (errObjPtr)
+    {
         Tcl_DecrRefCount(errObjPtr);
     }
     Tcl_ResetResult(interp);
 
     return result;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1546,8 +1626,7 @@ EmitScriptPreamble(Tcl_Interp *interp, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitScriptPostamble(Tcl_Interp *interp, Tcl_Channel chan)
+static int EmitScriptPostamble(Tcl_Interp* interp, Tcl_Channel chan)
 {
     char buf[256];
 
@@ -1556,13 +1635,14 @@ EmitScriptPostamble(Tcl_Interp *interp, Tcl_Channel chan)
 #else
     strcpy(buf, postambleFormat);
 #endif
-    if (EmitString(interp, buf, -1, '\n', chan) != TCL_OK) {
+    if (EmitString(interp, buf, -1, '\n', chan) != TCL_OK)
+    {
         PrependResult(interp, "error writing script postamble: ");
         return TCL_ERROR;
     }
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1582,12 +1662,12 @@ EmitScriptPostamble(Tcl_Interp *interp, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int  LocalProcCompileProc (Tcl_Interp *interp, Tcl_Parse *parsePtr, Command* cmdPtr, struct CompileEnv *compEnvPtr)
+static int LocalProcCompileProc(Tcl_Interp* interp, Tcl_Parse* parsePtr, Command* cmdPtr, struct CompileEnv* compEnvPtr)
 {
     AppendInstLocList(interp, compEnvPtr);
     return TCL_ERROR;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1607,10 +1687,9 @@ static int  LocalProcCompileProc (Tcl_Interp *interp, Tcl_Parse *parsePtr, Comma
  *----------------------------------------------------------------------
  */
 
-void
-CompilerInit(Tcl_Interp *interp)
+void CompilerInit(Tcl_Interp* interp)
 {
-    CompilerContext *ctxPtr;
+    CompilerContext* ctxPtr;
 
     /*
      * Initialize the local copies of pointers to some built-in object types.
@@ -1624,15 +1703,15 @@ CompilerInit(Tcl_Interp *interp)
      * Create the compiler context structure and attach it to the interp
      */
 
-    ctxPtr = (CompilerContext *)Tcl_Alloc(sizeof(CompilerContext));
-    Tcl_SetAssocData(interp, CMP_ASSOC_KEY, CleanCompilerContext, (void *) ctxPtr);
-    ctxPtr->ppi = (PostProcessInfo *) NULL;
+    ctxPtr = (CompilerContext*)Tcl_Alloc(sizeof(CompilerContext));
+    Tcl_SetAssocData(interp, CMP_ASSOC_KEY, CleanCompilerContext, (void*)ctxPtr);
+    ctxPtr->ppi = (PostProcessInfo*)NULL;
     ctxPtr->numProcs = 0;
     ctxPtr->numCompiledBodies = 0;
     ctxPtr->numUnsharedBodies = 0;
     ctxPtr->numUnshares = 0;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1651,15 +1730,14 @@ CompilerInit(Tcl_Interp *interp)
  *----------------------------------------------------------------------
  */
 
-static void
-CleanCompilerContext(void *clientData, Tcl_Interp *interp)
+static void CleanCompilerContext(void* clientData, Tcl_Interp* interp)
 {
-    CompilerContext *ctxPtr = (CompilerContext *) clientData;
+    CompilerContext* ctxPtr = (CompilerContext*)clientData;
 
     FreePostProcessInfo(ctxPtr->ppi);
-    Tcl_Free((char *) ctxPtr);
+    Tcl_Free((char*)ctxPtr);
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1676,18 +1754,18 @@ CleanCompilerContext(void *clientData, Tcl_Interp *interp)
  *----------------------------------------------------------------------
  */
 
-CompilerContext *
-CompilerGetContext(Tcl_Interp *interp)
+CompilerContext* CompilerGetContext(Tcl_Interp* interp)
 {
-    CompilerContext *ctxPtr = (CompilerContext *) Tcl_GetAssocData(interp, CMP_ASSOC_KEY, NULL);
+    CompilerContext* ctxPtr = (CompilerContext*)Tcl_GetAssocData(interp, CMP_ASSOC_KEY, NULL);
 
-    if (!ctxPtr) {
+    if (!ctxPtr)
+    {
         Tcl_Panic("unregistered compiler context!");
     }
 
     return ctxPtr;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1704,10 +1782,9 @@ CompilerGetContext(Tcl_Interp *interp)
  *----------------------------------------------------------------------
  */
 
-static void
-InitCompilerContext(Tcl_Interp *interp)
+static void InitCompilerContext(Tcl_Interp* interp)
 {
-    CompilerContext *ctxPtr = CompilerGetContext(interp);
+    CompilerContext* ctxPtr = CompilerGetContext(interp);
 
     FreePostProcessInfo(ctxPtr->ppi);
     ctxPtr->ppi = CreatePostProcessInfo();
@@ -1716,7 +1793,7 @@ InitCompilerContext(Tcl_Interp *interp)
     ctxPtr->numUnsharedBodies = 0;
     ctxPtr->numUnshares = 0;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1733,15 +1810,14 @@ InitCompilerContext(Tcl_Interp *interp)
  *----------------------------------------------------------------------
  */
 
-static void
-ReleaseCompilerContext(Tcl_Interp *interp)
+static void ReleaseCompilerContext(Tcl_Interp* interp)
 {
-    CompilerContext *ctxPtr = CompilerGetContext(interp);
+    CompilerContext* ctxPtr = CompilerGetContext(interp);
 
     FreePostProcessInfo(ctxPtr->ppi);
-    ctxPtr->ppi = (PostProcessInfo *) NULL;
+    ctxPtr->ppi = (PostProcessInfo*)NULL;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1759,14 +1835,14 @@ ReleaseCompilerContext(Tcl_Interp *interp)
  *----------------------------------------------------------------------
  */
 
-static InstLocList *
-CreateInstLocList(CompileEnv *envPtr)
+static InstLocList* CreateInstLocList(CompileEnv* envPtr)
 {
-    InstLocList *listPtr = (InstLocList *)Tcl_Alloc(sizeof(struct InstLocList));
-    listPtr->next = (InstLocList *) NULL;
+    InstLocList* listPtr = (InstLocList*)Tcl_Alloc(sizeof(struct InstLocList));
+    listPtr->next = (InstLocList*)NULL;
     listPtr->bytecodeOffset = envPtr->codeNext - envPtr->codeStart;
     listPtr->commandIndex = envPtr->numCommands - 1;
-    if ((listPtr->bytecodeOffset >= 9) && (INST_START_CMD == *(envPtr->codeNext-9))) {
+    if ((listPtr->bytecodeOffset >= 9) && (INST_START_CMD == *(envPtr->codeNext - 9)))
+    {
         /*
          * Tcl 8.5 core. Did emit an INST_START_CMD instruction. This
          * instruction goes away again due to us forcing the outline
@@ -1780,7 +1856,7 @@ CreateInstLocList(CompileEnv *envPtr)
     }
     return listPtr;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1798,20 +1874,19 @@ CreateInstLocList(CompileEnv *envPtr)
  *----------------------------------------------------------------------
  */
 
-static PostProcessInfo *
-CreatePostProcessInfo()
+static PostProcessInfo* CreatePostProcessInfo()
 {
-    PostProcessInfo *infoPtr = (PostProcessInfo *)Tcl_Alloc(sizeof(PostProcessInfo));
-    infoPtr->procs = (InstLocList *) NULL;
+    PostProcessInfo* infoPtr = (PostProcessInfo*)Tcl_Alloc(sizeof(PostProcessInfo));
+    infoPtr->procs = (InstLocList*)NULL;
     infoPtr->numProcs = 0;
     Tcl_InitHashTable(&infoPtr->objTable, TCL_ONE_WORD_KEYS);
-    infoPtr->infoArrayPtr = (ProcBodyInfo **) NULL;
+    infoPtr->infoArrayPtr = (ProcBodyInfo**)NULL;
     infoPtr->numUnshares = 0;
     infoPtr->numCompiledBodies = 0;
 
     return infoPtr;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1828,26 +1903,27 @@ CreatePostProcessInfo()
  *----------------------------------------------------------------------
  */
 
-static void
-FreePostProcessInfo(PostProcessInfo *infoPtr)
+static void FreePostProcessInfo(PostProcessInfo* infoPtr)
 {
-    if (infoPtr) {
-        InstLocList *nextPtr;
-        InstLocList *listPtr;
+    if (infoPtr)
+    {
+        InstLocList* nextPtr;
+        InstLocList* listPtr;
 
-        for (listPtr=infoPtr->procs; listPtr; listPtr=nextPtr) {
+        for (listPtr = infoPtr->procs; listPtr; listPtr = nextPtr)
+        {
             nextPtr = listPtr->next;
-            Tcl_Free((char *) listPtr);
+            Tcl_Free((char*)listPtr);
         }
 
         FreeProcBodyInfoArray(infoPtr);
 
         Tcl_DeleteHashTable(&infoPtr->objTable);
 
-        Tcl_Free((char *) infoPtr);
+        Tcl_Free((char*)infoPtr);
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1865,27 +1941,30 @@ FreePostProcessInfo(PostProcessInfo *infoPtr)
  *----------------------------------------------------------------------
  */
 
-static void
-AppendInstLocList(Tcl_Interp *interp, CompileEnv *compEnvPtr)
+static void AppendInstLocList(Tcl_Interp* interp, CompileEnv* compEnvPtr)
 {
-    CompilerContext *ctxPtr = CompilerGetContext(interp);
-    PostProcessInfo *infoPtr = ctxPtr->ppi;
-    InstLocList *newPtr = CreateInstLocList(compEnvPtr);
-    InstLocList *listPtr = infoPtr->procs;
+    CompilerContext* ctxPtr = CompilerGetContext(interp);
+    PostProcessInfo* infoPtr = ctxPtr->ppi;
+    InstLocList* newPtr = CreateInstLocList(compEnvPtr);
+    InstLocList* listPtr = infoPtr->procs;
 
-    if (listPtr) {
-        while (listPtr->next) {
+    if (listPtr)
+    {
+        while (listPtr->next)
+        {
             listPtr = listPtr->next;
         }
         listPtr->next = newPtr;
-    } else {
+    }
+    else
+    {
         infoPtr->procs = newPtr;
     }
 
     infoPtr->numProcs += 1;
     ctxPtr->numProcs += 1;
 }
-
+
 /*
  *-----------------------------------------------------------------------
  *
@@ -1917,8 +1996,7 @@ AppendInstLocList(Tcl_Interp *interp, CompileEnv *compEnvPtr)
  *----------------------------------------------------------------------
  */
 
-static int
-CompileObject(Tcl_Interp *interp, Tcl_Obj *objPtr)
+static int CompileObject(Tcl_Interp* interp, Tcl_Obj* objPtr)
 {
     int result;
     ProcInfo info;
@@ -1930,9 +2008,10 @@ CompileObject(Tcl_Interp *interp, Tcl_Obj *objPtr)
      * procedure bodies
      */
 
-    info.procCmdPtr = (Command *) Tcl_FindCommand(interp, "proc", (Tcl_Namespace *) NULL, 0);
+    info.procCmdPtr = (Command*)Tcl_FindCommand(interp, "proc", (Tcl_Namespace*)NULL, 0);
 
-    if (info.procCmdPtr) {
+    if (info.procCmdPtr)
+    {
         /*
          * For the time being, we don't need to make sure that this is really
          * the builtin "proc" command because we are running the compiler from
@@ -1959,7 +2038,7 @@ CompileObject(Tcl_Interp *interp, Tcl_Obj *objPtr)
 
     InitCompilerContext(interp);
 
-    result = TclSetByteCodeFromAny(interp, objPtr, PostProcessCompile, (void *) &info);
+    result = TclSetByteCodeFromAny(interp, objPtr, PostProcessCompile, (void*)&info);
 
     /*
      * Restore the "proc" command compile procedure.  This may be unnecessary
@@ -1967,7 +2046,8 @@ CompileObject(Tcl_Interp *interp, Tcl_Obj *objPtr)
      * error cases it may never be called.
      */
 
-    if (info.procCmdPtr) {
+    if (info.procCmdPtr)
+    {
         info.procCmdPtr->compileProc = info.savedCompileProc;
     }
 
@@ -1975,7 +2055,7 @@ CompileObject(Tcl_Interp *interp, Tcl_Obj *objPtr)
 
     return result;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -1992,11 +2072,10 @@ CompileObject(Tcl_Interp *interp, Tcl_Obj *objPtr)
  *----------------------------------------------------------------------
  */
 
-static int
-PostProcessCompile(Tcl_Interp *interp, struct CompileEnv *compEnvPtr, void *clientData)
+static int PostProcessCompile(Tcl_Interp* interp, struct CompileEnv* compEnvPtr, void* clientData)
 {
     int result;
-    ProcInfo *infoPtr = (ProcInfo *)clientData;
+    ProcInfo* infoPtr = (ProcInfo*)clientData;
 
     /*
      * restore the original compile proc for "proc" before we postprocess
@@ -2006,7 +2085,8 @@ PostProcessCompile(Tcl_Interp *interp, struct CompileEnv *compEnvPtr, void *clie
      * inconsistent with the number of process info struct stored).
      */
 
-    if (infoPtr->procCmdPtr) {
+    if (infoPtr->procCmdPtr)
+    {
         infoPtr->procCmdPtr->compileProc = infoPtr->savedCompileProc;
     }
 
@@ -2015,13 +2095,14 @@ PostProcessCompile(Tcl_Interp *interp, struct CompileEnv *compEnvPtr, void *clie
      */
 
     result = CompileProcBodies(interp, compEnvPtr);
-    if (result != TCL_OK) {
+    if (result != TCL_OK)
+    {
         return result;
     }
 
     return result;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2043,21 +2124,22 @@ PostProcessCompile(Tcl_Interp *interp, struct CompileEnv *compEnvPtr, void *clie
  *----------------------------------------------------------------------
  */
 
-static int
-CompileProcBodies(Tcl_Interp *interp, CompileEnv *compEnvPtr)
+static int CompileProcBodies(Tcl_Interp* interp, CompileEnv* compEnvPtr)
 {
-    CompilerContext *ctxPtr = CompilerGetContext(interp);
-    PostProcessInfo *infoPtr = ctxPtr->ppi;
-    ProcBodyInfo **infoArrayPtr;
+    CompilerContext* ctxPtr = CompilerGetContext(interp);
+    PostProcessInfo* infoPtr = ctxPtr->ppi;
+    ProcBodyInfo** infoArrayPtr;
     int result = TCL_OK;
     Tcl_Size i;
 
-    if (!infoPtr) {
+    if (!infoPtr)
+    {
         Tcl_Panic("CompileProcBodies: no postprocess info for interpreter");
         return TCL_ERROR;
     }
 
-    if (infoPtr->numProcs < 1) {
+    if (infoPtr->numProcs < 1)
+    {
         return TCL_OK;
     }
 
@@ -2076,10 +2158,13 @@ CompileProcBodies(Tcl_Interp *interp, CompileEnv *compEnvPtr)
      */
 
     infoPtr->numCompiledBodies = 0;
-    for (i=0; i < infoPtr->numProcs; i++) {
-        if (infoArrayPtr[i]->bodyNewIndex != -1) {
+    for (i = 0; i < infoPtr->numProcs; i++)
+    {
+        if (infoArrayPtr[i]->bodyNewIndex != -1)
+        {
             result = CompileOneProcBody(interp, infoArrayPtr[i], ctxPtr, compEnvPtr);
-            if (result != TCL_OK) {
+            if (result != TCL_OK)
+            {
                 return result;
             }
             infoPtr->numCompiledBodies++;
@@ -2095,7 +2180,7 @@ CompileProcBodies(Tcl_Interp *interp, CompileEnv *compEnvPtr)
 
     return result;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2116,15 +2201,14 @@ CompileProcBodies(Tcl_Interp *interp, CompileEnv *compEnvPtr)
  *----------------------------------------------------------------------
  */
 
-static void
-CreateProcBodyInfoArray(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *** arrayPtrPtr)
+static void CreateProcBodyInfoArray(PostProcessInfo* locInfoPtr, CompileEnv* compEnvPtr, ProcBodyInfo*** arrayPtrPtr)
 {
     Tcl_Size allocSize, arraySize;
     Tcl_Size i, numProcs = locInfoPtr->numProcs;
-    char *allocPtr;
-    ProcBodyInfo **infoAryPtr;
-    ProcBodyInfo *infoPtr;
-    InstLocList *locPtr;
+    char* allocPtr;
+    ProcBodyInfo** infoAryPtr;
+    ProcBodyInfo* infoPtr;
+    InstLocList* locPtr;
 
     FreeProcBodyInfoArray(locInfoPtr);
 
@@ -2133,15 +2217,16 @@ CreateProcBodyInfoArray(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr, Pro
      * info structs
      */
 
-    arraySize = (numProcs + 1) * sizeof(ProcBodyInfo *);
-    arraySize += TCL_ALIGN(arraySize);   /* align the info array */
+    arraySize = (numProcs + 1) * sizeof(ProcBodyInfo*);
+    arraySize += TCL_ALIGN(arraySize); /* align the info array */
     allocSize = arraySize + (numProcs * sizeof(ProcBodyInfo));
     allocPtr = Tcl_Alloc(allocSize);
 
-    locInfoPtr->infoArrayPtr = (ProcBodyInfo **) allocPtr;
+    locInfoPtr->infoArrayPtr = (ProcBodyInfo**)allocPtr;
     infoAryPtr = locInfoPtr->infoArrayPtr;
-    for (i=0; i <= numProcs; i++) {
-        *infoAryPtr = (ProcBodyInfo *) NULL;
+    for (i = 0; i <= numProcs; i++)
+    {
+        *infoAryPtr = (ProcBodyInfo*)NULL;
         infoAryPtr += 1;
     }
 
@@ -2150,10 +2235,11 @@ CreateProcBodyInfoArray(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr, Pro
      * and the push offsets
      */
 
-    infoPtr = (ProcBodyInfo *) (allocPtr + arraySize);
+    infoPtr = (ProcBodyInfo*)(allocPtr + arraySize);
     infoAryPtr = locInfoPtr->infoArrayPtr;
     locPtr = locInfoPtr->procs;
-    for (i=0; i < numProcs; i++) {
+    for (i = 0; i < numProcs; i++)
+    {
         *infoAryPtr = infoPtr;
         LoadProcBodyInfo(locPtr, compEnvPtr, infoPtr);
         infoAryPtr += 1;
@@ -2161,11 +2247,12 @@ CreateProcBodyInfoArray(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr, Pro
         locPtr = locPtr->next;
     }
 
-    if (arrayPtrPtr != NULL) {
+    if (arrayPtrPtr != NULL)
+    {
         *arrayPtrPtr = locInfoPtr->infoArrayPtr;
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2182,15 +2269,15 @@ CreateProcBodyInfoArray(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr, Pro
  *----------------------------------------------------------------------
  */
 
-static void
-FreeProcBodyInfoArray(PostProcessInfo *infoPtr)
+static void FreeProcBodyInfoArray(PostProcessInfo* infoPtr)
 {
-    if (infoPtr->infoArrayPtr) {
-        Tcl_Free((char *) infoPtr->infoArrayPtr);
+    if (infoPtr->infoArrayPtr)
+    {
+        Tcl_Free((char*)infoPtr->infoArrayPtr);
     }
-    infoPtr->infoArrayPtr = (ProcBodyInfo **) NULL;
+    infoPtr->infoArrayPtr = (ProcBodyInfo**)NULL;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2210,10 +2297,9 @@ FreeProcBodyInfoArray(PostProcessInfo *infoPtr)
  *
  *---------------------------------------------------------------------- */
 
-static void
-LoadProcBodyInfo(InstLocList *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *infoPtr)
+static void LoadProcBodyInfo(InstLocList* locInfoPtr, CompileEnv* compEnvPtr, ProcBodyInfo* infoPtr)
 {
-    unsigned char *pc = compEnvPtr->codeStart + locInfoPtr->bytecodeOffset;
+    unsigned char* pc = compEnvPtr->codeStart + locInfoPtr->bytecodeOffset;
 
     /*
      * Here is where we scan the bytecodes and figure out where the args
@@ -2255,55 +2341,58 @@ LoadProcBodyInfo(InstLocList *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *
      * Skip the "proc" string
      */
 
-    switch (*pc) {
-    case INST_PUSH1:
-        pc += 2;
-        break;
+    switch (*pc)
+    {
+        case INST_PUSH1:
+            pc += 2;
+            break;
 
-    case INST_PUSH4:
-        pc += 5;
-        break;
+        case INST_PUSH4:
+            pc += 5;
+            break;
 
-    default:
-        return;
+        default:
+            return;
     }
 
     /*
      * get the index of the proc name
      */
 
-    switch (*pc) {
-    case INST_PUSH1:
-        infoPtr->nameIndex = TclGetUInt1AtPtr(pc+1);
-        pc += 2;
-        break;
+    switch (*pc)
+    {
+        case INST_PUSH1:
+            infoPtr->nameIndex = TclGetUInt1AtPtr(pc + 1);
+            pc += 2;
+            break;
 
-    case INST_PUSH4:
-        infoPtr->nameIndex = TclGetUInt4AtPtr(pc+1);
-        pc += 5;
-        break;
+        case INST_PUSH4:
+            infoPtr->nameIndex = TclGetUInt4AtPtr(pc + 1);
+            pc += 5;
+            break;
 
-    default:
-        return;
+        default:
+            return;
     }
 
     /*
      * get the index of the argument list
      */
 
-    switch (*pc) {
-    case INST_PUSH1:
-        infoPtr->argsIndex = TclGetUInt1AtPtr(pc+1);
-        pc += 2;
-        break;
+    switch (*pc)
+    {
+        case INST_PUSH1:
+            infoPtr->argsIndex = TclGetUInt1AtPtr(pc + 1);
+            pc += 2;
+            break;
 
-    case INST_PUSH4:
-        infoPtr->argsIndex = TclGetUInt4AtPtr(pc+1);
-        pc += 5;
-        break;
+        case INST_PUSH4:
+            infoPtr->argsIndex = TclGetUInt4AtPtr(pc + 1);
+            pc += 5;
+            break;
 
-    default:
-        return;
+        default:
+            return;
     }
 
     /*
@@ -2312,19 +2401,20 @@ LoadProcBodyInfo(InstLocList *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *
      */
 
     infoPtr->bodyOffset = (pc - compEnvPtr->codeStart);
-    switch (*pc) {
-    case INST_PUSH1:
-        infoPtr->bodyOrigIndex = TclGetUInt1AtPtr(pc+1);
-        pc += 2;
-        break;
+    switch (*pc)
+    {
+        case INST_PUSH1:
+            infoPtr->bodyOrigIndex = TclGetUInt1AtPtr(pc + 1);
+            pc += 2;
+            break;
 
-    case INST_PUSH4:
-        infoPtr->bodyOrigIndex = TclGetUInt4AtPtr(pc+1);
-        pc += 5;
-        break;
+        case INST_PUSH4:
+            infoPtr->bodyOrigIndex = TclGetUInt4AtPtr(pc + 1);
+            pc += 5;
+            break;
 
-    default:
-        return;
+        default:
+            return;
     }
 
     /*
@@ -2338,7 +2428,8 @@ LoadProcBodyInfo(InstLocList *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *
      * argument 4
      */
 
-    if ((*pc != INST_INVOKE_STK1) || (TclGetUInt1AtPtr(pc+1) != 4)) {
+    if ((*pc != INST_INVOKE_STK1) || (TclGetUInt1AtPtr(pc + 1) != 4))
+    {
         infoPtr->nameIndex = -1;
         infoPtr->argsIndex = -1;
         infoPtr->bodyOrigIndex = -1;
@@ -2347,7 +2438,7 @@ LoadProcBodyInfo(InstLocList *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *
 
     return;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2364,18 +2455,17 @@ LoadProcBodyInfo(InstLocList *locInfoPtr, CompileEnv *compEnvPtr, ProcBodyInfo *
  *----------------------------------------------------------------------
  */
 
-static void
-LoadObjRefInfoTable(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr)
+static void LoadObjRefInfoTable(PostProcessInfo* locInfoPtr, CompileEnv* compEnvPtr)
 {
-    Tcl_HashTable *objTablePtr;
-    ProcBodyInfo **infoAryPtr;
-    ProcBodyInfo *infoPtr;
-    Tcl_HashEntry *entryPtr;
+    Tcl_HashTable* objTablePtr;
+    ProcBodyInfo** infoAryPtr;
+    ProcBodyInfo* infoPtr;
+    Tcl_HashEntry* entryPtr;
     int isNew;
     Tcl_Size objIndex;
-    ObjRefInfo *refInfoPtr;
-    InstructionDesc *opCodesTablePtr;
-    unsigned char *pc;
+    ObjRefInfo* refInfoPtr;
+    InstructionDesc* opCodesTablePtr;
+    unsigned char* pc;
 
     CleanObjRefInfoTable(locInfoPtr);
 
@@ -2384,18 +2474,22 @@ LoadObjRefInfoTable(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr)
      */
 
     objTablePtr = &locInfoPtr->objTable;
-    for (infoAryPtr=locInfoPtr->infoArrayPtr; *infoAryPtr; infoAryPtr++) {
+    for (infoAryPtr = locInfoPtr->infoArrayPtr; *infoAryPtr; infoAryPtr++)
+    {
         infoPtr = *infoAryPtr;
-        entryPtr = Tcl_CreateHashEntry(objTablePtr, (char *)INT2PTR(infoPtr->bodyOrigIndex), &isNew);
-        if (isNew) {
-            refInfoPtr = (ObjRefInfo *)Tcl_Alloc(sizeof(ObjRefInfo));
+        entryPtr = Tcl_CreateHashEntry(objTablePtr, (char*)INT2PTR(infoPtr->bodyOrigIndex), &isNew);
+        if (isNew)
+        {
+            refInfoPtr = (ObjRefInfo*)Tcl_Alloc(sizeof(ObjRefInfo));
             refInfoPtr->numReferences = 0;
             refInfoPtr->numProcReferences = 0;
             refInfoPtr->numUnshares = 0;
 
-            Tcl_SetHashValue(entryPtr, (void *) refInfoPtr);
-        } else {
-            refInfoPtr = (ObjRefInfo *) Tcl_GetHashValue(entryPtr);
+            Tcl_SetHashValue(entryPtr, (void*)refInfoPtr);
+        }
+        else
+        {
+            refInfoPtr = (ObjRefInfo*)Tcl_GetHashValue(entryPtr);
         }
 
         refInfoPtr->numProcReferences += 1;
@@ -2407,17 +2501,20 @@ LoadObjRefInfoTable(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr)
      * in the "proc" call.
      */
 
-    opCodesTablePtr = (InstructionDesc*) TclGetInstructionTable();
-    for (pc=compEnvPtr->codeStart; pc < compEnvPtr->codeNext; ) {
+    opCodesTablePtr = (InstructionDesc*)TclGetInstructionTable();
+    for (pc = compEnvPtr->codeStart; pc < compEnvPtr->codeNext;)
+    {
         objIndex = GetSharedIndex(pc);
-        if (objIndex >= 0) {
-            entryPtr = Tcl_FindHashEntry(objTablePtr, (char *)INT2PTR(objIndex));
-            if (entryPtr) {
+        if (objIndex >= 0)
+        {
+            entryPtr = Tcl_FindHashEntry(objTablePtr, (char*)INT2PTR(objIndex));
+            if (entryPtr)
+            {
                 /*
                  * this is a reference to a known procedure body
                  */
 
-                refInfoPtr = (ObjRefInfo *) Tcl_GetHashValue(entryPtr);
+                refInfoPtr = (ObjRefInfo*)Tcl_GetHashValue(entryPtr);
                 refInfoPtr->numReferences += 1;
             }
         }
@@ -2425,7 +2522,7 @@ LoadObjRefInfoTable(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr)
         pc += opCodesTablePtr[*pc].numBytes;
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2442,21 +2539,19 @@ LoadObjRefInfoTable(PostProcessInfo *locInfoPtr, CompileEnv *compEnvPtr)
  *----------------------------------------------------------------------
  */
 
-static void
-CleanObjRefInfoTable(PostProcessInfo *locInfoPtr)
+static void CleanObjRefInfoTable(PostProcessInfo* locInfoPtr)
 {
-    Tcl_HashSearch iterCtx;     /* the iteration context */
-    Tcl_HashEntry *entryPtr;
-    ObjRefInfo *refInfoPtr;
+    Tcl_HashSearch iterCtx; /* the iteration context */
+    Tcl_HashEntry* entryPtr;
+    ObjRefInfo* refInfoPtr;
 
-    for (entryPtr=Tcl_FirstHashEntry(&locInfoPtr->objTable, &iterCtx);
-         entryPtr;
-         entryPtr=Tcl_NextHashEntry(&iterCtx)) {
-        refInfoPtr = (ObjRefInfo *) Tcl_GetHashValue(entryPtr);
-        Tcl_Free((char *) refInfoPtr);
+    for (entryPtr = Tcl_FirstHashEntry(&locInfoPtr->objTable, &iterCtx); entryPtr; entryPtr = Tcl_NextHashEntry(&iterCtx))
+    {
+        refInfoPtr = (ObjRefInfo*)Tcl_GetHashValue(entryPtr);
+        Tcl_Free((char*)refInfoPtr);
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2478,25 +2573,25 @@ CleanObjRefInfoTable(PostProcessInfo *locInfoPtr)
  *----------------------------------------------------------------------
  */
 
-static int
-CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *ctxPtr, CompileEnv *compEnvPtr)
+static int CompileOneProcBody(Tcl_Interp* interp, ProcBodyInfo* infoPtr, CompilerContext* ctxPtr, CompileEnv* compEnvPtr)
 {
-    Interp *iPtr = (Interp *) interp;
-    Proc *procPtr = (Proc *) NULL;
-    Tcl_Command cmd = (Tcl_Command) NULL;
+    Interp* iPtr = (Interp*)interp;
+    Proc* procPtr = (Proc*)NULL;
+    Tcl_Command cmd = (Tcl_Command)NULL;
 
-    CompiledLocal *localPtr;
-    Proc *saveProcPtr;
-    Tcl_Obj *bodyPtr;
-    Tcl_Obj *procObjPtr;
+    CompiledLocal* localPtr;
+    Proc* saveProcPtr;
+    Tcl_Obj* bodyPtr;
+    Tcl_Obj* procObjPtr;
     Tcl_Size numArgs, i;
-    char *fullName;
+    char* fullName;
     char cmdNameBuf[64];
-    const char **argArray = NULL;
-    const char *p;
+    const char** argArray = NULL;
+    const char* p;
     int result = TCL_OK;
 
-    if (infoPtr->bodyNewIndex == -1) {
+    if (infoPtr->bodyNewIndex == -1)
+    {
         return TCL_OK;
     }
 
@@ -2530,7 +2625,7 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
 
     Tcl_IncrRefCount(bodyPtr);
 
-    procPtr = (Proc *)Tcl_Alloc(sizeof(Proc));
+    procPtr = (Proc*)Tcl_Alloc(sizeof(Proc));
     procPtr->iPtr = iPtr;
     procPtr->refCount = 1;
     procPtr->bodyPtr = bodyPtr;
@@ -2543,47 +2638,65 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
      */
 
     result = Tcl_SplitList(interp, Tcl_GetString(compEnvPtr->literalArrayPtr[infoPtr->argsIndex].objPtr), &numArgs, &argArray);
-    if (result != TCL_OK) {
+    if (result != TCL_OK)
+    {
         Tcl_DecrRefCount(bodyPtr);
-        Tcl_Free((char *) procPtr);
+        Tcl_Free((char*)procPtr);
         return result;
     }
 
     procPtr->numArgs = numArgs;
     procPtr->numCompiledLocals = numArgs;
 
-    for (i=0; i < numArgs; i++) {
+    for (i = 0; i < numArgs; i++)
+    {
         Tcl_Size fieldCount;
         Tcl_Size nameLength, valueLength;
-        const char **fieldValues;
+        const char** fieldValues;
 
         /*
          * Now divide the specifier up into name and default.
          */
 
         result = Tcl_SplitList(interp, argArray[i], &fieldCount, &fieldValues);
-        if (result != TCL_OK) {
+        if (result != TCL_OK)
+        {
             result = TCL_ERROR;
             break;
         }
-        if (fieldCount > 2) {
-            Tcl_Free((char *) fieldValues);
-            Tcl_AppendStringsToObj(Tcl_GetObjResult(interp), "compilation of procedure \"", fullName, "\" failed: too many fields in argument specifier \"", argArray[i], "\"", (char *) NULL);
+        if (fieldCount > 2)
+        {
+            Tcl_Free((char*)fieldValues);
+            Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
+                                   "compilation of procedure \"",
+                                   fullName,
+                                   "\" failed: too many fields in argument specifier \"",
+                                   argArray[i],
+                                   "\"",
+                                   (char*)NULL);
             result = TCL_ERROR;
             break;
         }
 
-        if ((fieldCount == 0) || (*fieldValues[0] == 0)) {
-            Tcl_Free((char *) fieldValues);
-            Tcl_AppendStringsToObj(Tcl_GetObjResult(interp), "compilation of procedure \"", fullName, "\" failed: argument with no name", (char *) NULL);
+        if ((fieldCount == 0) || (*fieldValues[0] == 0))
+        {
+            Tcl_Free((char*)fieldValues);
+            Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
+                                   "compilation of procedure \"",
+                                   fullName,
+                                   "\" failed: argument with no name",
+                                   (char*)NULL);
             result = TCL_ERROR;
             break;
         }
 
         nameLength = strlen(fieldValues[0]);
-        if (fieldCount == 2) {
+        if (fieldCount == 2)
+        {
             valueLength = strlen(fieldValues[1]);
-        } else {
+        }
+        else
+        {
             valueLength = 0;
         }
 
@@ -2592,22 +2705,28 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
          */
 
         p = fieldValues[0];
-        while (*p != '\0') {
-            if (*p == '(') {
-                const char *q = p;
-                do {
+        while (*p != '\0')
+        {
+            if (*p == '(')
+            {
+                const char* q = p;
+                do
+                {
                     q++;
                 } while (*q != '\0');
                 q--;
-                if (*q == ')') { /* we have an array element */
+                if (*q == ')')
+                { /* we have an array element */
                     Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
-                                           "compilation of procedure \"", fullName,
-                                           "\" failed: formal parameter \"", fieldValues[0],
+                                           "compilation of procedure \"",
+                                           fullName,
+                                           "\" failed: formal parameter \"",
+                                           fieldValues[0],
                                            "\" is an array element",
-                                           (char *) NULL);
-                    Tcl_Free((char *)fieldValues);
+                                           (char*)NULL);
+                    Tcl_Free((char*)fieldValues);
                     Tcl_DecrRefCount(bodyPtr);
-                    Tcl_Free((char *)procPtr);
+                    Tcl_Free((char*)procPtr);
                     return result;
                 }
             }
@@ -2618,11 +2737,14 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
          * Allocate an entry in the runtime procedure frame's array of local
          * variables for the argument.
          */
-        localPtr = (CompiledLocal *)Tcl_Alloc(offsetof(CompiledLocal, name) + 1U + nameLength);
+        localPtr = (CompiledLocal*)Tcl_Alloc(offsetof(CompiledLocal, name) + 1U + nameLength);
 
-        if (procPtr->firstLocalPtr == NULL) {
+        if (procPtr->firstLocalPtr == NULL)
+        {
             procPtr->firstLocalPtr = procPtr->lastLocalPtr = localPtr;
-        } else {
+        }
+        else
+        {
             procPtr->lastLocalPtr->nextPtr = localPtr;
             procPtr->lastLocalPtr = localPtr;
         }
@@ -2632,27 +2754,33 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
         localPtr->flags = VAR_ARGUMENT;
         localPtr->resolveInfo = NULL;
 
-        if (fieldCount == 2) {
+        if (fieldCount == 2)
+        {
             localPtr->defValuePtr = Tcl_NewStringObj(fieldValues[1], valueLength);
             Tcl_IncrRefCount(localPtr->defValuePtr);
-        } else {
+        }
+        else
+        {
             localPtr->defValuePtr = NULL;
         }
         strcpy(localPtr->name, fieldValues[0]);
 
-        Tcl_Free((char *) fieldValues);
+        Tcl_Free((char*)fieldValues);
     }
 
-    if (result != TCL_OK) {
-        for (localPtr = procPtr->firstLocalPtr; localPtr; ) {
-            CompiledLocal *next = localPtr->nextPtr;
-            if (localPtr->defValuePtr) Tcl_DecrRefCount(localPtr->defValuePtr);
+    if (result != TCL_OK)
+    {
+        for (localPtr = procPtr->firstLocalPtr; localPtr;)
+        {
+            CompiledLocal* next = localPtr->nextPtr;
+            if (localPtr->defValuePtr)
+                Tcl_DecrRefCount(localPtr->defValuePtr);
             Tcl_Free(localPtr);
             localPtr = next;
         }
         Tcl_DecrRefCount(bodyPtr);
-        Tcl_Free((char *)procPtr);
-        Tcl_Free((char *)argArray);
+        Tcl_Free((char*)procPtr);
+        Tcl_Free((char*)argArray);
         return result;
     }
 
@@ -2667,24 +2795,28 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
      * Make sure that the temporary name is not already used
      */
 
-    do {
+    do
+    {
         sprintf(cmdNameBuf, dummyCommandName, dummyCommandCounter);
-        cmd = Tcl_FindCommand(interp, dummyCommandName, (Tcl_Namespace *)NULL, TCL_GLOBAL_ONLY);
+        cmd = Tcl_FindCommand(interp, dummyCommandName, (Tcl_Namespace*)NULL, TCL_GLOBAL_ONLY);
         dummyCommandCounter += 1;
-    } while (cmd != (Tcl_Command) NULL);
+    } while (cmd != (Tcl_Command)NULL);
 
-    cmd = Tcl_CreateObjCommand(interp, cmdNameBuf, DummyObjInterpProc, (void *) procPtr, CmpDeleteProc);
+    cmd = Tcl_CreateObjCommand2(interp, cmdNameBuf, DummyObjInterpProc, (void*)procPtr, CmpDeleteProc);
 
-    if (cmd == (Tcl_Command) NULL) {
-        for (localPtr = procPtr->firstLocalPtr; localPtr; ) {
-            CompiledLocal *next = localPtr->nextPtr;
-            if (localPtr->defValuePtr) Tcl_DecrRefCount(localPtr->defValuePtr);
+    if (cmd == (Tcl_Command)NULL)
+    {
+        for (localPtr = procPtr->firstLocalPtr; localPtr;)
+        {
+            CompiledLocal* next = localPtr->nextPtr;
+            if (localPtr->defValuePtr)
+                Tcl_DecrRefCount(localPtr->defValuePtr);
             Tcl_Free(localPtr);
             localPtr = next;
         }
         Tcl_DecrRefCount(bodyPtr);
-        Tcl_Free((char *) procPtr);
-        Tcl_Free((char *) argArray);
+        Tcl_Free((char*)procPtr);
+        Tcl_Free((char*)argArray);
         return TCL_ERROR;
     }
 
@@ -2695,7 +2827,7 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
      * namespace if the proc was renamed into a different namespace.
      */
 
-    procPtr->cmdPtr = (Command *) cmd;
+    procPtr->cmdPtr = (Command*)cmd;
 
     /*
      * At this stage, we are ready to compile the procedure body.
@@ -2705,9 +2837,10 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
      * of bytecode type.
      */
 
-    if (bodyPtr->typePtr) {
+    if (bodyPtr->typePtr)
+    {
         bodyPtr->typePtr->freeIntRepProc(bodyPtr);
-        bodyPtr->typePtr = (Tcl_ObjType *) NULL;
+        bodyPtr->typePtr = (Tcl_ObjType*)NULL;
     }
 
     saveProcPtr = iPtr->compiledProcPtr;
@@ -2715,11 +2848,13 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
     result = cmpByteCodeType->setFromAnyProc(interp, bodyPtr);
     iPtr->compiledProcPtr = saveProcPtr;
 
-    if (result != TCL_OK) {
-        if (result == TCL_ERROR) {
+    if (result != TCL_OK)
+    {
+        if (result == TCL_ERROR)
+        {
             char buf[100];
             Tcl_Size numChars;
-            char *ellipsis;
+            char* ellipsis;
 
             /*
              * Prepend the procedure name to the error object
@@ -2730,15 +2865,21 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
 
             numChars = strlen(fullName);
             ellipsis = "";
-            if (numChars > 50) {
+            if (numChars > 50)
+            {
                 numChars = 50;
                 ellipsis = "...";
             }
-            sprintf(buf, "\n    (compiling body of proc \"%.*s%s\", line %d)", (int)numChars, fullName, ellipsis, Tcl_GetErrorLine(interp));
+            sprintf(buf,
+                    "\n    (compiling body of proc \"%.*s%s\", line %d)",
+                    (int)numChars,
+                    fullName,
+                    ellipsis,
+                    Tcl_GetErrorLine(interp));
             Tcl_AppendObjToErrorInfo(interp, Tcl_NewStringObj(buf, -1));
         }
         Tcl_DeleteCommandFromToken(interp, cmd);
-        Tcl_Free((char *)argArray);
+        Tcl_Free((char*)argArray);
         return result;
     }
 
@@ -2762,16 +2903,19 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
     Tcl_IncrRefCount(procObjPtr);
     compEnvPtr->literalArrayPtr[infoPtr->bodyNewIndex].objPtr = procObjPtr;
     Tcl_DecrRefCount(bodyPtr);
-    Tcl_Free((char *) argArray);
-    if (cmd) {
+    Tcl_Free((char*)argArray);
+    if (cmd)
+    {
         Tcl_DeleteCommandFromToken(interp, cmd);
-    } else {
+    }
+    else
+    {
         TclProcCleanupProc(procPtr);
     }
 
     return result;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2788,12 +2932,11 @@ CompileOneProcBody(Tcl_Interp *interp, ProcBodyInfo *infoPtr, CompilerContext *c
  *----------------------------------------------------------------------
  */
 
-static int
-DummyObjInterpProc(void *clientData, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+static int DummyObjInterpProc(void* clientData, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[])
 {
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2817,17 +2960,17 @@ DummyObjInterpProc(void *clientData, Tcl_Interp *interp, int objc, Tcl_Obj *cons
  *----------------------------------------------------------------------
  */
 
-static void
-CmpDeleteProc(void *clientData)
+static void CmpDeleteProc(void* clientData)
 {
-    Proc *procPtr = (Proc *) clientData;
+    Proc* procPtr = (Proc*)clientData;
 
     procPtr->refCount--;
-    if (procPtr->refCount <= 0) {
+    if (procPtr->refCount <= 0)
+    {
         TclProcCleanupProc(procPtr);
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2847,35 +2990,39 @@ CmpDeleteProc(void *clientData)
  *----------------------------------------------------------------------
  */
 
-static void
-UnshareProcBodies(Tcl_Interp *interp, CompilerContext *ctxPtr, CompileEnv *compEnvPtr)
+static void UnshareProcBodies(Tcl_Interp* interp, CompilerContext* ctxPtr, CompileEnv* compEnvPtr)
 {
-    PostProcessInfo *infoPtr = ctxPtr->ppi;
-    ProcBodyInfo **infoArrayPtr;
-    ProcBodyInfo *bodyInfoPtr;
+    PostProcessInfo* infoPtr = ctxPtr->ppi;
+    ProcBodyInfo** infoArrayPtr;
+    ProcBodyInfo* bodyInfoPtr;
     Tcl_Size origIndex;
-    Tcl_HashTable *objTablePtr;
-    Tcl_HashEntry *entryPtr;
-    ObjRefInfo *refInfoPtr;
+    Tcl_HashTable* objTablePtr;
+    Tcl_HashEntry* entryPtr;
+    ObjRefInfo* refInfoPtr;
 
     infoPtr->numUnshares = 0;
 
-    if (infoPtr->numProcs < 1) {
+    if (infoPtr->numProcs < 1)
+    {
         return;
     }
 
     objTablePtr = &infoPtr->objTable;
-    for (infoArrayPtr=infoPtr->infoArrayPtr; *infoArrayPtr; infoArrayPtr++) {
+    for (infoArrayPtr = infoPtr->infoArrayPtr; *infoArrayPtr; infoArrayPtr++)
+    {
         bodyInfoPtr = *infoArrayPtr;
         origIndex = bodyInfoPtr->bodyOrigIndex;
-        if (origIndex != -1) {
-            entryPtr = Tcl_FindHashEntry(objTablePtr, (char *)INT2PTR(origIndex));
-            if (!entryPtr) {
+        if (origIndex != -1)
+        {
+            entryPtr = Tcl_FindHashEntry(objTablePtr, (char*)INT2PTR(origIndex));
+            if (!entryPtr)
+            {
                 Tcl_Panic("UnshareProcBodies: no ObjRefInfo entry in objTable!");
             }
-            refInfoPtr = (ObjRefInfo *) Tcl_GetHashValue(entryPtr);
+            refInfoPtr = (ObjRefInfo*)Tcl_GetHashValue(entryPtr);
 
-            if (refInfoPtr->numReferences < 2) {
+            if (refInfoPtr->numReferences < 2)
+            {
                 /*
                  * Not a shared object, but we still need to remove
                  * the object from the literal hash table so it
@@ -2894,7 +3041,8 @@ UnshareProcBodies(Tcl_Interp *interp, CompilerContext *ctxPtr, CompileEnv *compE
              * unshare all the procedure bodies.
              */
 
-            if ((refInfoPtr->numReferences == refInfoPtr->numProcReferences) && (refInfoPtr->numUnshares < 1)) {
+            if ((refInfoPtr->numReferences == refInfoPtr->numProcReferences) && (refInfoPtr->numUnshares < 1))
+            {
                 /*
                  * do not copy the first occurrence, just remove it from
                  * the global and local literal hash tables
@@ -2902,7 +3050,9 @@ UnshareProcBodies(Tcl_Interp *interp, CompilerContext *ctxPtr, CompileEnv *compE
 
                 TclHideLiteral(interp, compEnvPtr, bodyInfoPtr->bodyNewIndex);
                 refInfoPtr->numUnshares = 1;
-            } else {
+            }
+            else
+            {
                 /* (xxxx) */
 
                 bodyInfoPtr->bodyNewIndex = UnshareObject(origIndex, compEnvPtr);
@@ -2911,13 +3061,14 @@ UnshareProcBodies(Tcl_Interp *interp, CompilerContext *ctxPtr, CompileEnv *compE
                 ctxPtr->numUnshares += 1;
             }
 
-            if (refInfoPtr->numUnshares == 1) {
+            if (refInfoPtr->numUnshares == 1)
+            {
                 ctxPtr->numUnsharedBodies += 1;
             }
         }
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2935,12 +3086,11 @@ UnshareProcBodies(Tcl_Interp *interp, CompilerContext *ctxPtr, CompileEnv *compE
  *----------------------------------------------------------------------
  */
 
-static int
-UnshareObject(Tcl_Size origIndex, CompileEnv *compEnvPtr)
+static int UnshareObject(Tcl_Size origIndex, CompileEnv* compEnvPtr)
 {
     return TclAddLiteralObj(compEnvPtr, Tcl_DuplicateObj(compEnvPtr->literalArrayPtr[origIndex].objPtr), NULL);
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -2973,18 +3123,18 @@ UnshareObject(Tcl_Size origIndex, CompileEnv *compEnvPtr)
  *----------------------------------------------------------------------
  */
 
-static void
-UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
+static void UpdateByteCodes(PostProcessInfo* infoPtr, CompileEnv* compEnvPtr)
 {
-    ProcBodyInfo **infoArrayPtr;
-    ProcBodyInfo *bodyInfoPtr;
+    ProcBodyInfo** infoArrayPtr;
+    ProcBodyInfo* bodyInfoPtr;
     Tcl_Size newIndex;
-    unsigned char *pc;
+    unsigned char* pc;
     Tcl_Size offset, delta;
     Tcl_Size procNameObjIndex;
-    Tcl_Obj *objPtr;
+    Tcl_Obj* objPtr;
 
-    if (infoPtr->numCompiledBodies == 0) {
+    if (infoPtr->numCompiledBodies == 0)
+    {
         return;
     }
 
@@ -3001,9 +3151,11 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
     Tcl_DecrRefCount(objPtr);
 
 #ifdef DEBUG_REWRITE
-    fprintf (stdout,"tbcload::bcproc @ %ld\n",procNameObjIndex);fflush(stdout);
+    fprintf(stdout, "tbcload::bcproc @ %ld\n", procNameObjIndex);
+    fflush(stdout);
 #endif
-    if (procNameObjIndex >= 255) {
+    if (procNameObjIndex >= 255)
+    {
         /*
          * This literal index signals that all the primary INST_PUSH
          * instructions (for the proc command name) will be rewritten from
@@ -3039,48 +3191,65 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
          */
 
         int jumps = 0;
-        InstructionDesc *opCodesTablePtr = (InstructionDesc*) TclGetInstructionTable();
+        InstructionDesc* opCodesTablePtr = (InstructionDesc*)TclGetInstructionTable();
 
         /*
          * Scan for jumps.
          */
 
-        for (pc=compEnvPtr->codeStart; pc < compEnvPtr->codeNext; ) {
-            if ((*pc >= INST_JUMP1) && (*pc <= INST_JUMP_FALSE4)) {
-                jumps ++;
+        for (pc = compEnvPtr->codeStart; pc < compEnvPtr->codeNext;)
+        {
+            if ((*pc >= INST_JUMP1) && (*pc <= INST_JUMP_FALSE4))
+            {
+                jumps++;
             }
             pc += opCodesTablePtr[*pc].numBytes;
         }
 
-        if (jumps) {
+        if (jumps)
+        {
             Tcl_Size codesize = compEnvPtr->codeNext - compEnvPtr->codeStart;
-            Tcl_Size* delta   = (Tcl_Size*)Tcl_Alloc (codesize * sizeof(Tcl_Size));
-            Tcl_Size offset   = 0;
+            Tcl_Size* delta = (Tcl_Size*)Tcl_Alloc(codesize * sizeof(Tcl_Size));
+            Tcl_Size offset = 0;
 
 #ifdef DEBUG_REWRITE
-            fprintf (stderr,"=== BEFORE START ===\n");
+            fprintf(stderr, "=== BEFORE START ===\n");
             {
                 Tcl_Size i, numExceptRanges = compEnvPtr->exceptArrayNext;
-                ExceptionRange *excPtr = compEnvPtr->exceptArrayPtr;
-                for (i=0; i < numExceptRanges; i++) {
-                    switch (excPtr->type) {
-                    case CATCH_EXCEPTION_RANGE:
-                        fprintf (stderr,"EC [%8ld] @%4ld /%4ld : %4ld\n", i, excPtr->codeOffset, excPtr->numCodeBytes, excPtr->catchOffset);
-                        break;
-                    case LOOP_EXCEPTION_RANGE:
-                        fprintf (stderr,"EL [%8ld] @%4ld /%4ld : %4ld %4ld\n", i, excPtr->codeOffset, excPtr->numCodeBytes, excPtr->breakOffset, excPtr->continueOffset);
-                        break;
-                    default:
-                        fprintf (stderr,"E? [%8ld] @%4ld /%4ld\n", i, excPtr->codeOffset, excPtr->numCodeBytes);
+                ExceptionRange* excPtr = compEnvPtr->exceptArrayPtr;
+                for (i = 0; i < numExceptRanges; i++)
+                {
+                    switch (excPtr->type)
+                    {
+                        case CATCH_EXCEPTION_RANGE:
+                            fprintf(stderr,
+                                    "EC [%8ld] @%4ld /%4ld : %4ld\n",
+                                    i,
+                                    excPtr->codeOffset,
+                                    excPtr->numCodeBytes,
+                                    excPtr->catchOffset);
+                            break;
+                        case LOOP_EXCEPTION_RANGE:
+                            fprintf(stderr,
+                                    "EL [%8ld] @%4ld /%4ld : %4ld %4ld\n",
+                                    i,
+                                    excPtr->codeOffset,
+                                    excPtr->numCodeBytes,
+                                    excPtr->breakOffset,
+                                    excPtr->continueOffset);
+                            break;
+                        default:
+                            fprintf(stderr, "E? [%8ld] @%4ld /%4ld\n", i, excPtr->codeOffset, excPtr->numCodeBytes);
                     }
                     excPtr += 1;
                 }
             }
-            for (pc=compEnvPtr->codeStart; pc < compEnvPtr->codeNext; ) {
-                FormatInstruction (compEnvPtr, pc);
+            for (pc = compEnvPtr->codeStart; pc < compEnvPtr->codeNext;)
+            {
+                FormatInstruction(compEnvPtr, pc);
                 pc += opCodesTablePtr[*pc].numBytes;
             }
-            fprintf (stderr,"=== BEFORE END =====\n");
+            fprintf(stderr, "=== BEFORE END =====\n");
             fflush(stderr);
 #endif
             /*
@@ -3091,22 +3260,25 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
              * in *4 form. In that case we can skip the expansion-rewrite.
              */
 
-            for (pc=compEnvPtr->codeStart; pc < compEnvPtr->codeNext; ) {
-                delta [pc - compEnvPtr->codeStart] = offset;
-                switch (*pc) {
-                case INST_JUMP1:
-                case INST_JUMP_TRUE1:
-                case INST_JUMP_FALSE1:
-                case INST_PUSH1:
-                    offset += 3;
-                    break;
-                default:
-                    break;
+            for (pc = compEnvPtr->codeStart; pc < compEnvPtr->codeNext;)
+            {
+                delta[pc - compEnvPtr->codeStart] = offset;
+                switch (*pc)
+                {
+                    case INST_JUMP1:
+                    case INST_JUMP_TRUE1:
+                    case INST_JUMP_FALSE1:
+                    case INST_PUSH1:
+                        offset += 3;
+                        break;
+                    default:
+                        break;
                 }
                 pc += opCodesTablePtr[*pc].numBytes;
             }
 
-            if (offset) {
+            if (offset)
+            {
                 /*
                  * We use a helper array for the expanded bytecode to avoid
                  * lots of shifting. We basically copy instructions from the
@@ -3120,91 +3292,122 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
                 unsigned char* pcnew = newbc;
                 Tcl_Size isize;
 
-                for (pc=compEnvPtr->codeStart; pc < compEnvPtr->codeNext; ) {
+                for (pc = compEnvPtr->codeStart; pc < compEnvPtr->codeNext;)
+                {
                     isize = opCodesTablePtr[*pc].numBytes;
 #ifdef DEBUG_REWRITE
-                    fprintf (stderr,"[%8ld] d%4ld s%2ld %s\n",pc-compEnvPtr->codeStart,delta [(pc - compEnvPtr->codeStart)],isize,opCodesTablePtr[*pc].name);fflush(stderr);
+                    fprintf(stderr,
+                            "[%8ld] d%4ld s%2ld %s\n",
+                            pc - compEnvPtr->codeStart,
+                            delta[(pc - compEnvPtr->codeStart)],
+                            isize,
+                            opCodesTablePtr[*pc].name);
+                    fflush(stderr);
 #endif
-                    switch (*pc) {
-                    case INST_JUMP1:
-                    case INST_JUMP_TRUE1:
-                    case INST_JUMP_FALSE1: {
-                        /*
-                         * These instructions expand to *4 form, and may have
-                         * to change their jump offset to compensate for
-                         * differences in shift for this instruction and at
-                         * the jump destination.
-                         */
+                    switch (*pc)
+                    {
+                        case INST_JUMP1:
+                        case INST_JUMP_TRUE1:
+                        case INST_JUMP_FALSE1:
+                        {
+                            /*
+                             * These instructions expand to *4 form, and may have
+                             * to change their jump offset to compensate for
+                             * differences in shift for this instruction and at
+                             * the jump destination.
+                             */
 
-                        int jmpdelta = TclGetInt1AtPtr(pc+1);
-                        int jmpshift = delta [(pc - compEnvPtr->codeStart)];
-                        int dstshift = delta [(pc - compEnvPtr->codeStart) + jmpdelta];
+                            int jmpdelta = TclGetInt1AtPtr(pc + 1);
+                            int jmpshift = delta[(pc - compEnvPtr->codeStart)];
+                            int dstshift = delta[(pc - compEnvPtr->codeStart) + jmpdelta];
 
-                        if (jmpshift != dstshift) {
+                            if (jmpshift != dstshift)
+                            {
 #ifdef DEBUG_REWRITE
-                            fprintf (stderr,"           JUMP1 change %4d (%4d/%4d) by %4d, now %4d\n",jmpdelta,jmpshift,dstshift,dstshift - jmpshift,jmpdelta + (dstshift - jmpshift));fflush(stderr);
+                                fprintf(stderr,
+                                        "           JUMP1 change %4d (%4d/%4d) by %4d, now %4d\n",
+                                        jmpdelta,
+                                        jmpshift,
+                                        dstshift,
+                                        dstshift - jmpshift,
+                                        jmpdelta + (dstshift - jmpshift));
+                                fflush(stderr);
 #endif
-                            jmpdelta += (dstshift - jmpshift);
-                        }
+                                jmpdelta += (dstshift - jmpshift);
+                            }
 
-                        /*
-                         * Instruction change!
-                         * HACK :: Assumes that the *1 and *4 forms
-                         * are paired, with *4 one higher than *1.
-                         * See tclCompile.h
-                         */
-                        TclUpdateInstInt4AtPc ((*pc)+1, jmpdelta, pcnew);
-                        pcnew += 5;
-
-                    }; break;
-                    case INST_JUMP4:
-                    case INST_JUMP_TRUE4:
-                    case INST_JUMP_FALSE4: {
-                        /*
-                         * While these instructions do not expand we still may
-                         * have to change their jump offset to compensate for
-                         * differences in shift for this instruction and at
-                         * the jump destination. If there is no difference no
-                         * change is needed. Otherwise the jump offset has to
-                         * be modified.
-                         */
-
-                        int jmpdelta = TclGetInt4AtPtr(pc+1);
-                        int jmpshift = delta [(pc - compEnvPtr->codeStart)];
-                        int dstshift = delta [(pc - compEnvPtr->codeStart) + jmpdelta];
-
-                        if (jmpshift != dstshift) {
-#ifdef DEBUG_REWRITE
-                            fprintf (stderr,"           JUMP4 change %4d (%4d/%4d) by %4d, now %4d\n",jmpdelta,jmpshift,dstshift,dstshift - jmpshift,jmpdelta + (dstshift - jmpshift));fflush(stderr);
-#endif
-                            jmpdelta += (dstshift - jmpshift);
-
-                            TclUpdateInstInt4AtPc ((*pc), jmpdelta, pcnew);
+                            /*
+                             * Instruction change!
+                             * HACK :: Assumes that the *1 and *4 forms
+                             * are paired, with *4 one higher than *1.
+                             * See tclCompile.h
+                             */
+                            TclUpdateInstInt4AtPc((*pc) + 1, jmpdelta, pcnew);
                             pcnew += 5;
+                        };
+                        break;
+                        case INST_JUMP4:
+                        case INST_JUMP_TRUE4:
+                        case INST_JUMP_FALSE4:
+                        {
+                            /*
+                             * While these instructions do not expand we still may
+                             * have to change their jump offset to compensate for
+                             * differences in shift for this instruction and at
+                             * the jump destination. If there is no difference no
+                             * change is needed. Otherwise the jump offset has to
+                             * be modified.
+                             */
 
-                        } else goto copy;
-                    }; break;
-                    case INST_PUSH1: {
-                        /*
-                         * All push1 instructions expand to push4. This code
-                         * copied from ReplacePushIndex, except that growing
-                         * is not necessary at this point.
-                         */
+                            int jmpdelta = TclGetInt4AtPtr(pc + 1);
+                            int jmpshift = delta[(pc - compEnvPtr->codeStart)];
+                            int dstshift = delta[(pc - compEnvPtr->codeStart) + jmpdelta];
 
-                        int literal = TclGetUInt1AtPtr(pc+1);
+                            if (jmpshift != dstshift)
+                            {
+#ifdef DEBUG_REWRITE
+                                fprintf(stderr,
+                                        "           JUMP4 change %4d (%4d/%4d) by %4d, now %4d\n",
+                                        jmpdelta,
+                                        jmpshift,
+                                        dstshift,
+                                        dstshift - jmpshift,
+                                        jmpdelta + (dstshift - jmpshift));
+                                fflush(stderr);
+#endif
+                                jmpdelta += (dstshift - jmpshift);
 
-                        TclUpdateInstInt4AtPc (INST_PUSH4, literal, pcnew);
-                        pcnew += 5;
+                                TclUpdateInstInt4AtPc((*pc), jmpdelta, pcnew);
+                                pcnew += 5;
+                            }
+                            else
+                                goto copy;
+                        };
+                        break;
+                        case INST_PUSH1:
+                        {
+                            /*
+                             * All push1 instructions expand to push4. This code
+                             * copied from ReplacePushIndex, except that growing
+                             * is not necessary at this point.
+                             */
 
-                    }; break;
-                    default: {
+                            int literal = TclGetUInt1AtPtr(pc + 1);
+
+                            TclUpdateInstInt4AtPc(INST_PUSH4, literal, pcnew);
+                            pcnew += 5;
+                        };
+                        break;
+                        default:
+                        {
                         copy:
-                        /*
-                         * All other instruction are copied as they are
-                         */
-                        memcpy (pcnew, pc, isize);
-                        pcnew += isize;
-                    }; break;
+                            /*
+                             * All other instruction are copied as they are
+                             */
+                            memcpy(pcnew, pc, isize);
+                            pcnew += isize;
+                        };
+                        break;
                     }
                     pc += isize;
                 }
@@ -3214,13 +3417,14 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
                  * compile environment and fix the auxiliary data structures.
                  */
 
-                while ((compEnvPtr->codeStart + newcodesize) > compEnvPtr->codeEnd) {
+                while ((compEnvPtr->codeStart + newcodesize) > compEnvPtr->codeEnd)
+                {
                     TclExpandCodeArray(compEnvPtr);
                 }
 
-                memcpy (compEnvPtr->codeStart, newbc, newcodesize);
+                memcpy(compEnvPtr->codeStart, newbc, newcodesize);
                 compEnvPtr->codeNext = compEnvPtr->codeStart + newcodesize;
-                Tcl_Free ((char*) newbc);
+                Tcl_Free((char*)newbc);
 
                 /*
                  * Fix the auxiliary data structures containing instruction
@@ -3235,11 +3439,12 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
 
                 {
                     Tcl_Size i;
-                    CmdLocation *locPtr;
+                    CmdLocation* locPtr;
 
-                    for (i=0; i < compEnvPtr->numCommands; i++) {
+                    for (i = 0; i < compEnvPtr->numCommands; i++)
+                    {
                         locPtr = &compEnvPtr->cmdMapPtr[i];
-                        locPtr->codeOffset  += delta [locPtr->codeOffset];
+                        locPtr->codeOffset += delta[locPtr->codeOffset];
                         locPtr->numCodeBytes = opCodesTablePtr[*(compEnvPtr->codeStart + locPtr->codeOffset)].numBytes;
                     }
                 }
@@ -3252,20 +3457,22 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
 
                 {
                     Tcl_Size i, numExceptRanges = compEnvPtr->exceptArrayNext;
-                    ExceptionRange *excPtr = compEnvPtr->exceptArrayPtr;
+                    ExceptionRange* excPtr = compEnvPtr->exceptArrayPtr;
 
-                    for (i=0; i < numExceptRanges; i++) {
-                        excPtr->numCodeBytes += delta [excPtr->codeOffset + excPtr->numCodeBytes];
-                        excPtr->codeOffset   += delta [excPtr->codeOffset];
+                    for (i = 0; i < numExceptRanges; i++)
+                    {
+                        excPtr->numCodeBytes += delta[excPtr->codeOffset + excPtr->numCodeBytes];
+                        excPtr->codeOffset += delta[excPtr->codeOffset];
 
-                        switch (excPtr->type) {
-                        case CATCH_EXCEPTION_RANGE:
-                            excPtr->catchOffset += delta [excPtr->catchOffset];
-                            break;
-                        case LOOP_EXCEPTION_RANGE:
-                            excPtr->breakOffset    += delta [excPtr->breakOffset];
-                            excPtr->continueOffset += delta [excPtr->continueOffset];
-                            break;
+                        switch (excPtr->type)
+                        {
+                            case CATCH_EXCEPTION_RANGE:
+                                excPtr->catchOffset += delta[excPtr->catchOffset];
+                                break;
+                            case LOOP_EXCEPTION_RANGE:
+                                excPtr->breakOffset += delta[excPtr->breakOffset];
+                                excPtr->continueOffset += delta[excPtr->continueOffset];
+                                break;
                         }
 
                         excPtr += 1;
@@ -3278,40 +3485,55 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
                  */
 
                 {
-                    for (infoArrayPtr=infoPtr->infoArrayPtr; *infoArrayPtr; infoArrayPtr++) {
+                    for (infoArrayPtr = infoPtr->infoArrayPtr; *infoArrayPtr; infoArrayPtr++)
+                    {
                         bodyInfoPtr = *infoArrayPtr;
-                        bodyInfoPtr->procOffset += delta [bodyInfoPtr->procOffset];
-                        bodyInfoPtr->bodyOffset += delta [bodyInfoPtr->bodyOffset];
+                        bodyInfoPtr->procOffset += delta[bodyInfoPtr->procOffset];
+                        bodyInfoPtr->bodyOffset += delta[bodyInfoPtr->bodyOffset];
                     }
                 }
             }
 
-            Tcl_Free((char*) delta);
+            Tcl_Free((char*)delta);
 
 #ifdef DEBUG_REWRITE
-            fprintf (stderr,"=== AFTER_ START ===\n");
+            fprintf(stderr, "=== AFTER_ START ===\n");
             {
                 Tcl_Size i, numExceptRanges = compEnvPtr->exceptArrayNext;
-                ExceptionRange *excPtr = compEnvPtr->exceptArrayPtr;
-                for (i=0; i < numExceptRanges; i++) {
-                    switch (excPtr->type) {
-                    case CATCH_EXCEPTION_RANGE:
-                        fprintf (stderr,"EC [%8ld] @%4ld /%4ld : %4ld\n", i, excPtr->codeOffset, excPtr->numCodeBytes, excPtr->catchOffset);
-                        break;
-                    case LOOP_EXCEPTION_RANGE:
-                        fprintf (stderr,"EL [%8ld] @%4ld /%4ld : %4ld %4ld\n", i, excPtr->codeOffset, excPtr->numCodeBytes, excPtr->breakOffset, excPtr->continueOffset);
-                        break;
-                    default:
-                        fprintf (stderr,"E? [%8ld] @%4ld /%4ld\n", i, excPtr->codeOffset, excPtr->numCodeBytes);
+                ExceptionRange* excPtr = compEnvPtr->exceptArrayPtr;
+                for (i = 0; i < numExceptRanges; i++)
+                {
+                    switch (excPtr->type)
+                    {
+                        case CATCH_EXCEPTION_RANGE:
+                            fprintf(stderr,
+                                    "EC [%8ld] @%4ld /%4ld : %4ld\n",
+                                    i,
+                                    excPtr->codeOffset,
+                                    excPtr->numCodeBytes,
+                                    excPtr->catchOffset);
+                            break;
+                        case LOOP_EXCEPTION_RANGE:
+                            fprintf(stderr,
+                                    "EL [%8ld] @%4ld /%4ld : %4ld %4ld\n",
+                                    i,
+                                    excPtr->codeOffset,
+                                    excPtr->numCodeBytes,
+                                    excPtr->breakOffset,
+                                    excPtr->continueOffset);
+                            break;
+                        default:
+                            fprintf(stderr, "E? [%8ld] @%4ld /%4ld\n", i, excPtr->codeOffset, excPtr->numCodeBytes);
                     }
                     excPtr += 1;
                 }
             }
-            for (pc=compEnvPtr->codeStart; pc < compEnvPtr->codeNext; ) {
-                FormatInstruction (compEnvPtr, pc);
+            for (pc = compEnvPtr->codeStart; pc < compEnvPtr->codeNext;)
+            {
+                FormatInstruction(compEnvPtr, pc);
                 pc += opCodesTablePtr[*pc].numBytes;
             }
-            fprintf (stderr,"=== AFTER_ END =====\n");
+            fprintf(stderr, "=== AFTER_ END =====\n");
             fflush(stderr);
 #endif
         }
@@ -3328,7 +3550,8 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
 
     offset = 0;
 
-    for (infoArrayPtr=infoPtr->infoArrayPtr; *infoArrayPtr; infoArrayPtr++) {
+    for (infoArrayPtr = infoPtr->infoArrayPtr; *infoArrayPtr; infoArrayPtr++)
+    {
         bodyInfoPtr = *infoArrayPtr;
         newIndex = bodyInfoPtr->bodyNewIndex;
 
@@ -3339,7 +3562,8 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
         bodyInfoPtr->procOffset += offset;
         bodyInfoPtr->bodyOffset += offset;
 
-        if (newIndex != -1) {
+        if (newIndex != -1)
+        {
             /*
              * Replace the index for the command name object. This is done for
              * all compiled procedure bodies
@@ -3350,7 +3574,8 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
             offset += delta;
             bodyInfoPtr->bodyOffset += delta;
 
-            if (newIndex != bodyInfoPtr->bodyOrigIndex) {
+            if (newIndex != bodyInfoPtr->bodyOrigIndex)
+            {
                 /*
                  * replace the index of the body with the unshared index
                  */
@@ -3370,7 +3595,7 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
         }
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3390,57 +3615,60 @@ UpdateByteCodes(PostProcessInfo *infoPtr, CompileEnv *compEnvPtr)
  *----------------------------------------------------------------------
  */
 
-static int
-ReplacePushIndex(Tcl_Size commandIndex, unsigned char *pc, Tcl_Size newIndex, CompileEnv *compEnvPtr)
+static int ReplacePushIndex(Tcl_Size commandIndex, unsigned char* pc, Tcl_Size newIndex, CompileEnv* compEnvPtr)
 {
     Tcl_Size offset = 0;
 
-    switch (*pc) {
-    case INST_PUSH1:
-        if (newIndex < 255) {
-            pc += 1;
-            *pc = (unsigned char) newIndex;
-        } else {
-            int savedOffset = pc - compEnvPtr->codeStart;
-            ShiftByteCodes(commandIndex, savedOffset, 3, compEnvPtr);
-            pc = compEnvPtr->codeStart + savedOffset;
-            *pc++ = INST_PUSH4;
-            *pc++ = (unsigned char) ((unsigned int) newIndex >> 24);
-            *pc++ = (unsigned char) ((unsigned int) newIndex >> 16);
-            *pc++ = (unsigned char) ((unsigned int) newIndex >>  8);
-            *pc++ = (unsigned char) ((unsigned int) newIndex);
+    switch (*pc)
+    {
+        case INST_PUSH1:
+            if (newIndex < 255)
+            {
+                pc += 1;
+                *pc = (unsigned char)newIndex;
+            }
+            else
+            {
+                int savedOffset = pc - compEnvPtr->codeStart;
+                ShiftByteCodes(commandIndex, savedOffset, 3, compEnvPtr);
+                pc = compEnvPtr->codeStart + savedOffset;
+                *pc++ = INST_PUSH4;
+                *pc++ = (unsigned char)((unsigned int)newIndex >> 24);
+                *pc++ = (unsigned char)((unsigned int)newIndex >> 16);
+                *pc++ = (unsigned char)((unsigned int)newIndex >> 8);
+                *pc++ = (unsigned char)((unsigned int)newIndex);
 
+                /*
+                 * we shifted everything right by 3 bytes
+                 */
+
+                offset += 3;
+            }
+            break;
+
+        case INST_PUSH4:
             /*
-             * we shifted everything right by 3 bytes
+             * Because a 4 byte PUSH supports a single byte, we don't
+             * bother shrinking the bytecodes, just fit the new
+             * index in. It is unlikely that this will happen anyway, because
+             * we add new objects at the end of the object array anyway.
              */
 
-            offset += 3;
-        }
-        break;
+            pc += 1;
+            *pc++ = (unsigned char)((unsigned int)newIndex >> 24);
+            *pc++ = (unsigned char)((unsigned int)newIndex >> 16);
+            *pc++ = (unsigned char)((unsigned int)newIndex >> 8);
+            *pc++ = (unsigned char)((unsigned int)newIndex);
+            break;
 
-    case INST_PUSH4:
-        /*
-         * Because a 4 byte PUSH supports a single byte, we don't
-         * bother shrinking the bytecodes, just fit the new
-         * index in. It is unlikely that this will happen anyway, because
-         * we add new objects at the end of the object array anyway.
-         */
-
-        pc += 1;
-        *pc++ = (unsigned char) ((unsigned int) newIndex >> 24);
-        *pc++ = (unsigned char) ((unsigned int) newIndex >> 16);
-        *pc++ = (unsigned char) ((unsigned int) newIndex >>  8);
-        *pc++ = (unsigned char) ((unsigned int) newIndex);
-        break;
-
-    default:
-        Tcl_Panic("ReplacePushIndex: expected a push opcode");
-        break;
+        default:
+            Tcl_Panic("ReplacePushIndex: expected a push opcode");
+            break;
     }
 
     return offset;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3460,20 +3688,20 @@ ReplacePushIndex(Tcl_Size commandIndex, unsigned char *pc, Tcl_Size newIndex, Co
  *----------------------------------------------------------------------
  */
 
-static void
-ShiftByteCodes(Tcl_Size commandIndex, Tcl_Size startOffset, Tcl_Size shiftCount, CompileEnv *compEnvPtr)
+static void ShiftByteCodes(Tcl_Size commandIndex, Tcl_Size startOffset, Tcl_Size shiftCount, CompileEnv* compEnvPtr)
 {
     unsigned char *fromPtr, *toPtr;
     Tcl_Size currBytes, numCmds, i;
-    CmdLocation *locPtr;
+    CmdLocation* locPtr;
     Tcl_Size numExceptRanges, start, end;
-    ExceptionRange *excPtr;
+    ExceptionRange* excPtr;
 
     /*
      * Grow the array if necessary
      */
 
-    if ((compEnvPtr->codeNext + shiftCount) > compEnvPtr->codeEnd) {
+    if ((compEnvPtr->codeNext + shiftCount) > compEnvPtr->codeEnd)
+    {
         TclExpandCodeArray(compEnvPtr);
     }
 
@@ -3504,7 +3732,8 @@ ShiftByteCodes(Tcl_Size commandIndex, Tcl_Size startOffset, Tcl_Size shiftCount,
     locPtr += 1;
 
     numCmds = compEnvPtr->numCommands;
-    for (i=commandIndex+1; i < numCmds; i++) {
+    for (i = commandIndex + 1; i < numCmds; i++)
+    {
         locPtr->codeOffset += shiftCount;
         locPtr += 1;
     }
@@ -3520,13 +3749,18 @@ ShiftByteCodes(Tcl_Size commandIndex, Tcl_Size startOffset, Tcl_Size shiftCount,
 
     numExceptRanges = compEnvPtr->exceptArrayNext;
     excPtr = compEnvPtr->exceptArrayPtr;
-    for (i=0; i < numExceptRanges; i++) {
+    for (i = 0; i < numExceptRanges; i++)
+    {
         start = excPtr->codeOffset;
-        if (start > startOffset) {
+        if (start > startOffset)
+        {
             excPtr->codeOffset += shiftCount;
-        } else {
+        }
+        else
+        {
             end = start + excPtr->numCodeBytes;
-            if (end > startOffset) {
+            if (end > startOffset)
+            {
                 /*
                  * the starting offset for the bytecodes shift was inside the
                  * range, so in this case we don't bump the code offset,
@@ -3537,27 +3771,31 @@ ShiftByteCodes(Tcl_Size commandIndex, Tcl_Size startOffset, Tcl_Size shiftCount,
             }
         }
 
-        switch (excPtr->type) {
-        case CATCH_EXCEPTION_RANGE:
-            if (excPtr->catchOffset > startOffset) {
-                excPtr->catchOffset += shiftCount;
-            }
-            break;
+        switch (excPtr->type)
+        {
+            case CATCH_EXCEPTION_RANGE:
+                if (excPtr->catchOffset > startOffset)
+                {
+                    excPtr->catchOffset += shiftCount;
+                }
+                break;
 
-        case LOOP_EXCEPTION_RANGE:
-            if (excPtr->breakOffset > startOffset) {
-                excPtr->breakOffset += shiftCount;
-            }
-            if (excPtr->continueOffset > startOffset) {
-                excPtr->continueOffset += shiftCount;
-            }
-            break;
+            case LOOP_EXCEPTION_RANGE:
+                if (excPtr->breakOffset > startOffset)
+                {
+                    excPtr->breakOffset += shiftCount;
+                }
+                if (excPtr->continueOffset > startOffset)
+                {
+                    excPtr->continueOffset += shiftCount;
+                }
+                break;
         }
 
         excPtr += 1;
     }
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3577,27 +3815,27 @@ ShiftByteCodes(Tcl_Size commandIndex, Tcl_Size startOffset, Tcl_Size shiftCount,
  *----------------------------------------------------------------------
  */
 
-static Tcl_Size
-GetSharedIndex(unsigned char *pc)
+static Tcl_Size GetSharedIndex(unsigned char* pc)
 {
     unsigned int objIndex;
 
-    switch (*pc) {
-    case INST_PUSH1:
-        objIndex = TclGetUInt1AtPtr(pc+1);
-        break;
+    switch (*pc)
+    {
+        case INST_PUSH1:
+            objIndex = TclGetUInt1AtPtr(pc + 1);
+            break;
 
-    case INST_PUSH4:
-        objIndex = TclGetUInt4AtPtr(pc+1);
-        break;
+        case INST_PUSH4:
+            objIndex = TclGetUInt4AtPtr(pc + 1);
+            break;
 
-    default:
-        return -1;
+        default:
+            return -1;
     }
 
     return (Tcl_Size)objIndex;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3614,16 +3852,16 @@ GetSharedIndex(unsigned char *pc)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitNewForeachInfo(Tcl_Interp *interp, ForeachInfo *infoPtr, Tcl_Channel chan)
+static int EmitNewForeachInfo(Tcl_Interp* interp, ForeachInfo* infoPtr, Tcl_Channel chan)
 {
     Tcl_Size i, j, lastEntry, result;
-    Tcl_Size *varIndexesPtr;
+    Tcl_Size* varIndexesPtr;
     char separator;
-    ForeachVarList *varListPtr;
+    ForeachVarList* varListPtr;
 
     result = EmitTclSize(interp, infoPtr->numLists, ' ', chan);
-    if (result != TCL_OK) {
+    if (result != TCL_OK)
+    {
         return result;
     }
     /*
@@ -3631,28 +3869,34 @@ EmitNewForeachInfo(Tcl_Interp *interp, ForeachInfo *infoPtr, Tcl_Channel chan)
      * Dropped from saved bytecode.
      */
     result = EmitTclSize(interp, infoPtr->loopCtTemp, '\n', chan);
-    if (result != TCL_OK) {
+    if (result != TCL_OK)
+    {
         return result;
     }
 
-    for (i=0; i < infoPtr->numLists; i++) {
+    for (i = 0; i < infoPtr->numLists; i++)
+    {
         varListPtr = infoPtr->varLists[i];
 
         result = EmitTclSize(interp, varListPtr->numVars, '\n', chan);
-        if (result != TCL_OK) {
+        if (result != TCL_OK)
+        {
             return result;
         }
 
         varIndexesPtr = varListPtr->varIndexes;
         separator = ' ';
         lastEntry = varListPtr->numVars - 1;
-        for (j=0; j <= lastEntry; j++) {
-            if (j == lastEntry) {
+        for (j = 0; j <= lastEntry; j++)
+        {
+            if (j == lastEntry)
+            {
                 separator = '\n';
             }
 
             result = EmitTclSize(interp, *varIndexesPtr, separator, chan);
-            if (result != TCL_OK) {
+            if (result != TCL_OK)
+            {
                 return result;
             }
 
@@ -3662,7 +3906,7 @@ EmitNewForeachInfo(Tcl_Interp *interp, ForeachInfo *infoPtr, Tcl_Channel chan)
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3679,47 +3923,51 @@ EmitNewForeachInfo(Tcl_Interp *interp, ForeachInfo *infoPtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitJumptableInfo(Tcl_Interp *interp, JumptableInfo *infoPtr, Tcl_Channel chan)
+static int EmitJumptableInfo(Tcl_Interp* interp, JumptableInfo* infoPtr, Tcl_Channel chan)
 {
     int result;
     Tcl_Size numJmp;
     Tcl_HashSearch jmpHashSearch;
-    Tcl_HashEntry *jmpHashEntry;
-    char *key;
+    Tcl_HashEntry* jmpHashEntry;
+    char* key;
 
     numJmp = 0;
 
     /* get number of entries */
-    jmpHashEntry = Tcl_FirstHashEntry(&infoPtr->hashTable,&jmpHashSearch);
-    while(jmpHashEntry) {
+    jmpHashEntry = Tcl_FirstHashEntry(&infoPtr->hashTable, &jmpHashSearch);
+    while (jmpHashEntry)
+    {
         numJmp++;
         jmpHashEntry = Tcl_NextHashEntry(&jmpHashSearch);
     }
 
     result = EmitTclSize(interp, numJmp, '\n', chan);
-    if (result != TCL_OK) {
+    if (result != TCL_OK)
+    {
         return result;
     }
 
-    jmpHashEntry = Tcl_FirstHashEntry(&infoPtr->hashTable,&jmpHashSearch);
-    while(jmpHashEntry) {
+    jmpHashEntry = Tcl_FirstHashEntry(&infoPtr->hashTable, &jmpHashSearch);
+    while (jmpHashEntry)
+    {
         result = EmitTclSize(interp, PTR2INT(Tcl_GetHashValue(jmpHashEntry)), '\n', chan);
-        if (result != TCL_OK) {
+        if (result != TCL_OK)
+        {
             return result;
         }
 
         key = Tcl_GetHashKey(&infoPtr->hashTable, jmpHashEntry);
 
-        result = EmitByteSequence(interp, (unsigned char *) key, strlen(key), chan);
-        if (result != TCL_OK) {
+        result = EmitByteSequence(interp, (unsigned char*)key, strlen(key), chan);
+        if (result != TCL_OK)
+        {
             return result;
         }
         jmpHashEntry = Tcl_NextHashEntry(&jmpHashSearch);
     }
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3736,27 +3984,29 @@ EmitJumptableInfo(Tcl_Interp *interp, JumptableInfo *infoPtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitDictUpdateInfo(Tcl_Interp *interp, DictUpdateInfo *infoPtr, Tcl_Channel chan)
+static int EmitDictUpdateInfo(Tcl_Interp* interp, DictUpdateInfo* infoPtr, Tcl_Channel chan)
 {
     int result;
     Tcl_Size i;
 
     result = EmitTclSize(interp, infoPtr->length, '\n', chan);
-    if (result != TCL_OK) {
+    if (result != TCL_OK)
+    {
         return result;
     }
 
-    for (i = 0; i < infoPtr->length; i++) {
-        result = EmitTclSize(interp, infoPtr->varIndices [i], '\n', chan);
-        if (result != TCL_OK) {
+    for (i = 0; i < infoPtr->length; i++)
+    {
+        result = EmitTclSize(interp, infoPtr->varIndices[i], '\n', chan);
+        if (result != TCL_OK)
+        {
             return result;
         }
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3776,14 +4026,14 @@ EmitDictUpdateInfo(Tcl_Interp *interp, DictUpdateInfo *infoPtr, Tcl_Channel chan
  *----------------------------------------------------------------------
  */
 
-static int
-EmitProcBody(Tcl_Interp *interp, Proc *procPtr, Tcl_Channel chan)
+static int EmitProcBody(Tcl_Interp* interp, Proc* procPtr, Tcl_Channel chan)
 {
     int result;
-    Tcl_Obj *bodyPtr = procPtr->bodyPtr;
-    CompiledLocal *localPtr;
+    Tcl_Obj* bodyPtr = procPtr->bodyPtr;
+    CompiledLocal* localPtr;
 
-    if (bodyPtr->typePtr != cmpByteCodeType) {
+    if (bodyPtr->typePtr != cmpByteCodeType)
+    {
         Tcl_Panic("EmitProcBody: body is not compiled");
     }
 
@@ -3791,8 +4041,9 @@ EmitProcBody(Tcl_Interp *interp, Proc *procPtr, Tcl_Channel chan)
      * Emit the ByteCode associated with this proc body
      */
 
-    result = EmitByteCode(interp, (ByteCode *) bodyPtr->internalRep.otherValuePtr, chan);
-    if (result != TCL_OK) {
+    result = EmitByteCode(interp, (ByteCode*)bodyPtr->internalRep.otherValuePtr, chan);
+    if (result != TCL_OK)
+    {
         return result;
     }
 
@@ -3800,21 +4051,24 @@ EmitProcBody(Tcl_Interp *interp, Proc *procPtr, Tcl_Channel chan)
      * Now the additional Proc fields
      */
 
-    if ((EmitTclSize(interp, procPtr->numArgs, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, procPtr->numCompiledLocals, '\n', chan) != TCL_OK)) {
+    if ((EmitTclSize(interp, procPtr->numArgs, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, procPtr->numCompiledLocals, '\n', chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 
-    for (localPtr=procPtr->firstLocalPtr; localPtr; localPtr=localPtr->nextPtr) {
+    for (localPtr = procPtr->firstLocalPtr; localPtr; localPtr = localPtr->nextPtr)
+    {
         result = EmitCompiledLocal(interp, localPtr, chan);
-        if (result != TCL_OK) {
+        if (result != TCL_OK)
+        {
             return result;
         }
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3831,8 +4085,7 @@ EmitProcBody(Tcl_Interp *interp, Proc *procPtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static int
-EmitCompiledLocal(Tcl_Interp *interp, CompiledLocal* localPtr, Tcl_Channel chan)
+static int EmitCompiledLocal(Tcl_Interp* interp, CompiledLocal* localPtr, Tcl_Channel chan)
 {
     int hasDef = (localPtr->defValuePtr) ? 1 : 0;
     int i, flags;
@@ -3842,7 +4095,8 @@ EmitCompiledLocal(Tcl_Interp *interp, CompiledLocal* localPtr, Tcl_Channel chan)
      * First the name.
      */
 
-    if (EmitByteSequence(interp, (unsigned char *) localPtr->name, localPtr->nameLength, chan) != TCL_OK) {
+    if (EmitByteSequence(interp, (unsigned char*)localPtr->name, localPtr->nameLength, chan) != TCL_OK)
+    {
         return TCL_ERROR;
     }
 
@@ -3854,8 +4108,10 @@ EmitCompiledLocal(Tcl_Interp *interp, CompiledLocal* localPtr, Tcl_Channel chan)
     bit = 1;
     mask = 0;
     flags = localPtr->flags;
-    for (i=0; i < varFlagsListSize; i++) {
-        if (flags & varFlagsList[i]) {
+    for (i = 0; i < varFlagsListSize; i++)
+    {
+        if (flags & varFlagsList[i])
+        {
             mask |= bit;
         }
         bit <<= 1;
@@ -3865,9 +4121,9 @@ EmitCompiledLocal(Tcl_Interp *interp, CompiledLocal* localPtr, Tcl_Channel chan)
      * emit the control fields in a single line, except for nameLength
      * which was emitted with the name.
      */
-    if ((EmitTclSize(interp, localPtr->frameIndex, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, hasDef, ' ', chan) != TCL_OK)
-        || (EmitTclSize(interp, mask, '\n', chan) != TCL_OK)) {
+    if ((EmitTclSize(interp, localPtr->frameIndex, ' ', chan) != TCL_OK) || (EmitTclSize(interp, hasDef, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, mask, '\n', chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 
@@ -3875,13 +4131,14 @@ EmitCompiledLocal(Tcl_Interp *interp, CompiledLocal* localPtr, Tcl_Channel chan)
      * the default value if any
      */
 
-    if (hasDef && (EmitObject(interp, localPtr->defValuePtr, chan) != TCL_OK)) {
+    if (hasDef && (EmitObject(interp, localPtr->defValuePtr, chan) != TCL_OK))
+    {
         return TCL_ERROR;
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3898,8 +4155,7 @@ EmitCompiledLocal(Tcl_Interp *interp, CompiledLocal* localPtr, Tcl_Channel chan)
  *----------------------------------------------------------------------
  */
 
-static void
-A85InitEncodeContext(Tcl_Channel target, int separator, A85EncodeContext *ctxPtr)
+static void A85InitEncodeContext(Tcl_Channel target, int separator, A85EncodeContext* ctxPtr)
 {
     ctxPtr->target = target;
     ctxPtr->basePtr = &ctxPtr->encBuffer[0];
@@ -3907,7 +4163,7 @@ A85InitEncodeContext(Tcl_Channel target, int separator, A85EncodeContext *ctxPtr
     ctxPtr->endPtr = ctxPtr->curPtr + ENCODED_BUFFER_SIZE;
     ctxPtr->separator = separator;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3927,33 +4183,37 @@ A85InitEncodeContext(Tcl_Channel target, int separator, A85EncodeContext *ctxPtr
  *----------------------------------------------------------------------
  */
 
-static int
-A85EncodeBytes (Tcl_Interp *interp, unsigned char *bytesPtr, Tcl_Size numBytes, A85EncodeContext *ctxPtr)
+static int A85EncodeBytes(Tcl_Interp* interp, unsigned char* bytesPtr, Tcl_Size numBytes, A85EncodeContext* ctxPtr)
 {
     unsigned long word = 0;
     Tcl_Size i;
     char toEmit[5];
 
-    for (i=numBytes; i < 4; i++) {
+    for (i = numBytes; i < 4; i++)
+    {
         bytesPtr[i] = 0;
     }
 
-    for (i=3; i >= 0; i--) {
+    for (i = 3; i >= 0; i--)
+    {
         word <<= 8;
         word |= bytesPtr[i];
     }
 
-    if (word == 0) {
+    if (word == 0)
+    {
         A85EmitChar(interp, 'z', ctxPtr);
-    } else {
-
+    }
+    else
+    {
         /*
          * We emit from least significant to most significant char, so that
          * the 0 chars from an incomplete 4-tuple are the last ones in the
          * sequence and can be omitted (for the last 4-tuple in the array).
          */
 
-        for (i=0; i < 5; i++) {
+        for (i = 0; i < 5; i++)
+        {
             toEmit[i] = EN(word % 85UL);
             word /= 85UL;
         }
@@ -3964,14 +4224,15 @@ A85EncodeBytes (Tcl_Interp *interp, unsigned char *bytesPtr, Tcl_Size numBytes, 
          * number of bytes that were encoded).
          */
 
-        for (i=0; i <= numBytes; i++) {
+        for (i = 0; i <= numBytes; i++)
+        {
             A85EmitChar(interp, toEmit[i], ctxPtr);
         }
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3988,19 +4249,19 @@ A85EncodeBytes (Tcl_Interp *interp, unsigned char *bytesPtr, Tcl_Size numBytes, 
  *----------------------------------------------------------------------
  */
 
-static int
-A85EmitChar(Tcl_Interp *interp, int toEmit, A85EncodeContext *ctxPtr)
+static int A85EmitChar(Tcl_Interp* interp, int toEmit, A85EncodeContext* ctxPtr)
 {
     *(ctxPtr->curPtr) = toEmit;
     ctxPtr->curPtr += 1;
 
-    if (ctxPtr->curPtr >= ctxPtr->endPtr) {
+    if (ctxPtr->curPtr >= ctxPtr->endPtr)
+    {
         return A85Flush(interp, ctxPtr);
     }
 
     return TCL_OK;
 }
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -4017,20 +4278,22 @@ A85EmitChar(Tcl_Interp *interp, int toEmit, A85EncodeContext *ctxPtr)
  *----------------------------------------------------------------------
  */
 
-static int
-A85Flush(Tcl_Interp *interp, A85EncodeContext *ctxPtr)
+static int A85Flush(Tcl_Interp* interp, A85EncodeContext* ctxPtr)
 {
     int toWrite = ctxPtr->curPtr - ctxPtr->basePtr;
 
-    if (Tcl_Write(ctxPtr->target, ctxPtr->basePtr, toWrite) < 0) {
+    if (Tcl_Write(ctxPtr->target, ctxPtr->basePtr, toWrite) < 0)
+    {
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("Tcl_Write: %s", Tcl_PosixError(interp)));
         return TCL_ERROR;
     }
 
     ctxPtr->curPtr = ctxPtr->basePtr;
 
-    if (ctxPtr->separator != '\0') {
-        if (Tcl_Write(ctxPtr->target, &ctxPtr->separator, 1) < 0) {
+    if (ctxPtr->separator != '\0')
+    {
+        if (Tcl_Write(ctxPtr->target, &ctxPtr->separator, 1) < 0)
+        {
             Tcl_SetObjResult(interp, Tcl_ObjPrintf("Tcl_Write: %s", Tcl_PosixError(interp)));
             return TCL_ERROR;
         }
@@ -4039,146 +4302,168 @@ A85Flush(Tcl_Interp *interp, A85EncodeContext *ctxPtr)
     return TCL_OK;
 }
 
-
 #ifdef DEBUG_REWRITE
 /*
  * Snarfed from tclCompile.c and modified for our environment.
  * Prints directly to stderr.
  */
-static void
-PrintSource(const char *stringPtr, int maxChars)
+static void PrintSource(const char* stringPtr, int maxChars)
 {
-    const char *p;
+    const char* p;
     int i = 0;
 
-    if (stringPtr == NULL) {
-        fprintf(stderr,"%s", "\"\"");
+    if (stringPtr == NULL)
+    {
+        fprintf(stderr, "%s", "\"\"");
         return;
     }
 
-    fprintf(stderr,"%s", "\"");
+    fprintf(stderr, "%s", "\"");
     p = stringPtr;
-    for (;  (*p != '\0') && (i < maxChars);  p++, i++) {
-        switch (*p) {
-        case '"':
-            fprintf(stderr,"%s", "\\\"");
-            continue;
-        case '\f':
-            fprintf(stderr,"%s", "\\f");
-            continue;
-        case '\n':
-            fprintf(stderr,"%s", "\\n");
-            continue;
-        case '\r':
-            fprintf(stderr,"%s", "\\r");
-            continue;
-        case '\t':
-            fprintf(stderr,"%s", "\\t");
-            continue;
-        case '\v':
-            fprintf(stderr,"%s", "\\v");
-            continue;
-        default:
-            fprintf (stderr, "%c", *p);
-            continue;
+    for (; (*p != '\0') && (i < maxChars); p++, i++)
+    {
+        switch (*p)
+        {
+            case '"':
+                fprintf(stderr, "%s", "\\\"");
+                continue;
+            case '\f':
+                fprintf(stderr, "%s", "\\f");
+                continue;
+            case '\n':
+                fprintf(stderr, "%s", "\\n");
+                continue;
+            case '\r':
+                fprintf(stderr, "%s", "\\r");
+                continue;
+            case '\t':
+                fprintf(stderr, "%s", "\\t");
+                continue;
+            case '\v':
+                fprintf(stderr, "%s", "\\v");
+                continue;
+            default:
+                fprintf(stderr, "%c", *p);
+                continue;
         }
     }
-    fprintf(stderr,"%s", "\"");
+    fprintf(stderr, "%s", "\"");
 }
 
-static void
-FormatInstruction(CompileEnv* compEnvPtr, unsigned char *pc)
+static void FormatInstruction(CompileEnv* compEnvPtr, unsigned char* pc)
 {
     unsigned char opCode = *pc;
-    InstructionDesc* opCodesTablePtr = (InstructionDesc*) TclGetInstructionTable();
-    InstructionDesc *instDesc = &opCodesTablePtr[opCode];
-    unsigned char *codeStart = compEnvPtr->codeStart;
+    InstructionDesc* opCodesTablePtr = (InstructionDesc*)TclGetInstructionTable();
+    InstructionDesc* instDesc = &opCodesTablePtr[opCode];
+    unsigned char* codeStart = compEnvPtr->codeStart;
     unsigned pcOffset = pc - codeStart;
     int opnd = 0, i, numBytes = 1;
     char suffixBuffer[128]; /* Additional info to print after main opcode
                              * and immediates. */
-    char *suffixSrc = NULL;
-    Tcl_Obj *suffixObj = NULL;
+    char* suffixSrc = NULL;
+    Tcl_Obj* suffixObj = NULL;
 
     suffixBuffer[0] = '\0';
-    fprintf (stderr,"(%u) %s ", pcOffset, instDesc->name);
-    for (i = 0;  i < instDesc->numOperands;  i++) {
-        switch (instDesc->opTypes[i]) {
-        case OPERAND_INT1:
-            opnd = TclGetInt1AtPtr(pc+numBytes); numBytes++;
-            if (opCode == INST_JUMP1 || opCode == INST_JUMP_TRUE1
-                || opCode == INST_JUMP_FALSE1) {
-                sprintf(suffixBuffer, "pc %u", pcOffset+opnd);
-            }
-            fprintf (stderr,"%+d ", opnd);
-            break;
-        case OPERAND_INT4:
-            opnd = TclGetInt4AtPtr(pc+numBytes); numBytes += 4;
-            if (opCode == INST_JUMP4 || opCode == INST_JUMP_TRUE4
-                || opCode == INST_JUMP_FALSE4) {
-                sprintf(suffixBuffer, "pc %u", pcOffset+opnd);
-            } else if (opCode == INST_START_CMD) {
-                sprintf(suffixBuffer, "next cmd at pc %u", pcOffset+opnd);
-            }
-            fprintf (stderr,"%+d ", opnd);
-            break;
-        case OPERAND_UINT1:
-            opnd = TclGetUInt1AtPtr(pc+numBytes); numBytes++;
-            if (opCode == INST_PUSH1) {
-                suffixObj = compEnvPtr->literalArrayPtr[opnd].objPtr;
-            }
-            fprintf (stderr,"%u ", (unsigned) opnd);
-            break;
-        case OPERAND_AUX4:
-        case OPERAND_UINT4:
-            opnd = TclGetUInt4AtPtr(pc+numBytes); numBytes += 4;
-            if (opCode == INST_PUSH4) {
-                suffixObj = compEnvPtr->literalArrayPtr[opnd].objPtr;
-            } else if (opCode == INST_START_CMD && opnd != 1) {
-                sprintf(suffixBuffer+strlen(suffixBuffer), ", %u cmds start here", opnd);
-            }
-            fprintf (stderr,"%u ", (unsigned) opnd);
-            break;
-        case OPERAND_IDX4:
-            opnd = TclGetInt4AtPtr(pc+numBytes); numBytes += 4;
-            if (opnd >= -1) {
-                fprintf (stderr,"%d ", opnd);
-            } else if (opnd == -2) {
-                fprintf (stderr,"end ");
-            } else {
-                fprintf (stderr,"end-%d ", -2-opnd);
-            }
-            break;
-        case OPERAND_LVT1:
-            opnd = TclGetUInt1AtPtr(pc+numBytes);
-            numBytes++;
-            goto printLVTindex;
-        case OPERAND_LVT4:
-            opnd = TclGetUInt4AtPtr(pc+numBytes);
-            numBytes += 4;
-        printLVTindex:
-            fprintf (stderr,"%%v%u ", (unsigned) opnd);
-            break;
-        case OPERAND_NONE:
-        default:
-            break;
+    fprintf(stderr, "(%u) %s ", pcOffset, instDesc->name);
+    for (i = 0; i < instDesc->numOperands; i++)
+    {
+        switch (instDesc->opTypes[i])
+        {
+            case OPERAND_INT1:
+                opnd = TclGetInt1AtPtr(pc + numBytes);
+                numBytes++;
+                if (opCode == INST_JUMP1 || opCode == INST_JUMP_TRUE1 || opCode == INST_JUMP_FALSE1)
+                {
+                    sprintf(suffixBuffer, "pc %u", pcOffset + opnd);
+                }
+                fprintf(stderr, "%+d ", opnd);
+                break;
+            case OPERAND_INT4:
+                opnd = TclGetInt4AtPtr(pc + numBytes);
+                numBytes += 4;
+                if (opCode == INST_JUMP4 || opCode == INST_JUMP_TRUE4 || opCode == INST_JUMP_FALSE4)
+                {
+                    sprintf(suffixBuffer, "pc %u", pcOffset + opnd);
+                }
+                else if (opCode == INST_START_CMD)
+                {
+                    sprintf(suffixBuffer, "next cmd at pc %u", pcOffset + opnd);
+                }
+                fprintf(stderr, "%+d ", opnd);
+                break;
+            case OPERAND_UINT1:
+                opnd = TclGetUInt1AtPtr(pc + numBytes);
+                numBytes++;
+                if (opCode == INST_PUSH1)
+                {
+                    suffixObj = compEnvPtr->literalArrayPtr[opnd].objPtr;
+                }
+                fprintf(stderr, "%u ", (unsigned)opnd);
+                break;
+            case OPERAND_AUX4:
+            case OPERAND_UINT4:
+                opnd = TclGetUInt4AtPtr(pc + numBytes);
+                numBytes += 4;
+                if (opCode == INST_PUSH4)
+                {
+                    suffixObj = compEnvPtr->literalArrayPtr[opnd].objPtr;
+                }
+                else if (opCode == INST_START_CMD && opnd != 1)
+                {
+                    sprintf(suffixBuffer + strlen(suffixBuffer), ", %u cmds start here", opnd);
+                }
+                fprintf(stderr, "%u ", (unsigned)opnd);
+                break;
+            case OPERAND_IDX4:
+                opnd = TclGetInt4AtPtr(pc + numBytes);
+                numBytes += 4;
+                if (opnd >= -1)
+                {
+                    fprintf(stderr, "%d ", opnd);
+                }
+                else if (opnd == -2)
+                {
+                    fprintf(stderr, "end ");
+                }
+                else
+                {
+                    fprintf(stderr, "end-%d ", -2 - opnd);
+                }
+                break;
+            case OPERAND_LVT1:
+                opnd = TclGetUInt1AtPtr(pc + numBytes);
+                numBytes++;
+                goto printLVTindex;
+            case OPERAND_LVT4:
+                opnd = TclGetUInt4AtPtr(pc + numBytes);
+                numBytes += 4;
+            printLVTindex:
+                fprintf(stderr, "%%v%u ", (unsigned)opnd);
+                break;
+            case OPERAND_NONE:
+            default:
+                break;
         }
     }
-    if (suffixObj) {
-        char *bytes;
+    if (suffixObj)
+    {
+        char* bytes;
         Tcl_Size length;
 
-        fprintf (stderr,"\t# ");
+        fprintf(stderr, "\t# ");
         bytes = Tcl_GetStringFromObj(compEnvPtr->literalArrayPtr[opnd].objPtr, &length);
 
         PrintSource(bytes, (length < 40 ? length : 40));
-    } else if (suffixBuffer[0]) {
-        fprintf (stderr,"\t# %s", suffixBuffer);
-        if (suffixSrc) {
+    }
+    else if (suffixBuffer[0])
+    {
+        fprintf(stderr, "\t# %s", suffixBuffer);
+        if (suffixSrc)
+        {
             PrintSource(suffixSrc, 40);
         }
     }
-    fprintf (stderr,"\n");
+    fprintf(stderr, "\n");
 }
 #endif
 /*

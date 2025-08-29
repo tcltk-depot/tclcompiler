@@ -1,7 +1,7 @@
 # all.tcl for tclcompiler tests
 
-if {![info exists ::tcl::pkg::ifneeded(compiler,1.9.0)]} {
-    package ifneeded compiler 1.9.0 {load {} compiler}
+if {![info exists ::tcl::pkg::ifneeded(tclcompiler,1.9.0)]} {
+    package ifneeded tclcompiler 1.9.0 {load {} tclcompiler}
 }
 
 if {"::tcltest" ni [namespace children]} {
