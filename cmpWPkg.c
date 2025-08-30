@@ -34,12 +34,12 @@ typedef struct VarTable
 typedef struct CmdTable
 {
     const char* cmdName;   /* unqualified subcommand */
-    Tcl_ObjCmdProc2* proc; /* implementation */
+    Tcl_ObjCmdProc *proc;  /* implementation */
     int exportIt;          /* nonzero => export */
 } CmdTable;
 
 /* Local command (modern signature) */
-static int Compiler_GetTclVerObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[]);
+static int Compiler_GetTclVerObjCmd(void* dummy, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]);
 
 /* Variables & commands installed by this package */
 static const VarTable variables[] = {{errorVariable, errorMessage}, {NULL, NULL}};
@@ -72,7 +72,7 @@ static int RegisterCommand(Tcl_Interp* interp, const char* ns, const CmdTable* c
     Tcl_DStringAppend(&fq, "::", 2);
     Tcl_DStringAppend(&fq, cmd->cmdName, -1);
 
-    Tcl_CreateObjCommand2(interp, Tcl_DStringValue(&fq), cmd->proc, NULL, NULL);
+    Tcl_CreateObjCommand(interp, Tcl_DStringValue(&fq), cmd->proc, NULL, NULL);
     Tcl_DStringFree(&fq);
 
     if (cmd->exportIt)
@@ -113,12 +113,12 @@ static int RegisterVariable(Tcl_Interp* interp, const char* ns, const VarTable* 
 int Tclcompiler_Init(Tcl_Interp* interp)
 {
 #ifdef USE_TCL_STUBS
-    if (!Tcl_InitStubs(interp, "9.0", 1))
+    if (!Tcl_InitStubs(interp, TCL_VERSION, 1))
     {
         return TCL_ERROR;
     }
 #else
-    if (Tcl_PkgRequire(interp, "Tcl", "9.0", 1) == NULL)
+    if (Tcl_PkgRequire(interp, "Tcl", TCL_VERSION, 1) == NULL)
     {
         return TCL_ERROR;
     }
@@ -156,7 +156,7 @@ int Tclcompiler_SafeInit(Tcl_Interp* interp)
 }
 
 /* --- simple utility subcommand: ::compiler::getTclVer --- */
-static int Compiler_GetTclVerObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[])
+static int Compiler_GetTclVerObjCmd(void* dummy, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
 {
     (void)dummy;
     (void)objc;

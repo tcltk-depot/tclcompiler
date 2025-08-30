@@ -37,10 +37,10 @@
 #define TCL_STORAGE_CLASS DLLIMPORT
 #endif
 
-EXTERN int Compiler_CompileObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[]);
+EXTERN Tcl_ObjCmdProc Compiler_CompileObjCmd;
 EXTERN int Compiler_CompileFile(Tcl_Interp* interp, char* inFilePtr, char* outFilePtr, char* preamblePtr);
 EXTERN int Compiler_CompileObj(Tcl_Interp* interp, Tcl_Obj* objPtr);
-EXTERN int Compiler_GetBytecodeExtensionObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[]);
+EXTERN Tcl_ObjCmdProc Compiler_GetBytecodeExtensionObjCmd;
 
 EXTERN const char* CompilerGetPackageName(void);
 EXTERN int Compiler_Init(Tcl_Interp* interp);
