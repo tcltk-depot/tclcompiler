@@ -1,6 +1,3 @@
-Copyright (c) 1999-2000 Ajuba Solutions
-Copyright (c) 2018 ActiveState Software Inc.
-Released under the BSD-3 license. See LICENSE file for details.
 
 # tclcompile
 
@@ -22,4 +19,10 @@ For detailed usage, limitations and other information, see the Chapter 6 of the
 [TclPro User's Guide](https://www.tcl-lang.org/software/tclpro/doc/TclProUsersGuide14.pdf).
 Although dated, most of the information there is still applicable.
 
+## License and Copyright
 
+```
+Copyright (c) 1999-2000 Ajuba Solutions
+Copyright (c) 2018 ActiveState Software Inc.
+Released under the BSD-3 license. See LICENSE file for details.
+```

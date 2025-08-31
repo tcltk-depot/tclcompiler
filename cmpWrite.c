@@ -309,7 +309,7 @@ static void CreateProcBodyInfoArray(PostProcessInfo* locInfoPtr, CompileEnv* com
 static PostProcessInfo* CreatePostProcessInfo(void);
 static InstLocList* CreateInstLocList(CompileEnv* envPtr);
 static void CmpDeleteProc(void* clientData);
-static int DummyObjInterpProc(void* clientData, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[]);
+static Tcl_ObjCmdProc DummyObjInterpProc;
 static int EmitAuxDataArray(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan);
 static int EmitByteCode(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel chan);
 static int EmitByteSequence(Tcl_Interp* interp, unsigned char* bytesPtr, Tcl_Size length, Tcl_Channel chan);
@@ -373,7 +373,7 @@ static void FormatInstruction(CompileEnv* compEnvPtr, unsigned char* pc);
  *----------------------------------------------------------------------
  */
 
-int Compiler_CompileObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[])
+int Compiler_CompileObjCmd(void* dummy, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
 {
     static char argsMsg[] = "?-preamble value? inputFileName ?outputFileName?";
 
@@ -443,7 +443,7 @@ int Compiler_CompileObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_O
  *----------------------------------------------------------------------
  */
 
-int Compiler_GetBytecodeExtensionObjCmd(void* dummy, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[])
+int Compiler_GetBytecodeExtensionObjCmd(void* dummy, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
 {
     Tcl_Obj* objPtr = Tcl_NewStringObj(tcExtension, -1);
     Tcl_SetObjResult(interp, objPtr);
@@ -2775,7 +2775,7 @@ static int CompileOneProcBody(Tcl_Interp* interp, ProcBodyInfo* infoPtr, Compile
             CompiledLocal* next = localPtr->nextPtr;
             if (localPtr->defValuePtr)
                 Tcl_DecrRefCount(localPtr->defValuePtr);
-            Tcl_Free(localPtr);
+            Tcl_Free((void*)localPtr);
             localPtr = next;
         }
         Tcl_DecrRefCount(bodyPtr);
@@ -2802,7 +2802,7 @@ static int CompileOneProcBody(Tcl_Interp* interp, ProcBodyInfo* infoPtr, Compile
         dummyCommandCounter += 1;
     } while (cmd != (Tcl_Command)NULL);
 
-    cmd = Tcl_CreateObjCommand2(interp, cmdNameBuf, DummyObjInterpProc, (void*)procPtr, CmpDeleteProc);
+    cmd = Tcl_CreateObjCommand(interp, cmdNameBuf, DummyObjInterpProc, (void*)procPtr, CmpDeleteProc);
 
     if (cmd == (Tcl_Command)NULL)
     {
@@ -2811,7 +2811,7 @@ static int CompileOneProcBody(Tcl_Interp* interp, ProcBodyInfo* infoPtr, Compile
             CompiledLocal* next = localPtr->nextPtr;
             if (localPtr->defValuePtr)
                 Tcl_DecrRefCount(localPtr->defValuePtr);
-            Tcl_Free(localPtr);
+            Tcl_Free((char*)localPtr);
             localPtr = next;
         }
         Tcl_DecrRefCount(bodyPtr);
@@ -2932,7 +2932,7 @@ static int CompileOneProcBody(Tcl_Interp* interp, ProcBodyInfo* infoPtr, Compile
  *----------------------------------------------------------------------
  */
 
-static int DummyObjInterpProc(void* clientData, Tcl_Interp* interp, Tcl_Size objc, Tcl_Obj* const objv[])
+static int DummyObjInterpProc(void* clientData, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
 {
     return TCL_OK;
 }
