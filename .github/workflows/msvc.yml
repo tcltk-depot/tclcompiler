@@ -72,3 +72,5 @@ jobs:
       with:
         toolchain: 'vc'
         run-tests: ${{ inputs.run-tests }}
+        make-opts: 'TCLDIR=${{ env.TCLGA_TCLSOURCE }}'
+        test-opts: 'TCLDIR=${{ env.TCLGA_TCLSOURCE }}'
