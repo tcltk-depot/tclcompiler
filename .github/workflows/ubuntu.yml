@@ -47,12 +47,12 @@ jobs:
 
     - name: Setup Tcl
       id: tcl-setup-step
-      uses: apnadkarni/tcl-setup@v1
+      uses: apnadkarni/tcl-setup@v2-dev
       with:
         tcl-tag: ${{ matrix.tcl-tag }}
 
     - name: Build extension
       id: tcl-build-step
-      uses: apnadkarni/tcl-build-extension@v1
+      uses: apnadkarni/tcl-build-extension@v1.1-dev
       with:
         run-tests: ${{ inputs.run-tests }}
