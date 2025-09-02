@@ -27,7 +27,7 @@ on:
           - '["macos-13"]'
           - '["macos-14"]'
           - '["macos-15"]'
-          - '["macos-13", "macos-14", "macos-15]'
+          - '["macos-13", "macos-14", "macos-15"]'
         default: '["macos-latest"]'
       run-tests: # Whether tests should be run
         description: 'Run tests as well'
@@ -47,13 +47,13 @@ jobs:
 
     - name: Setup Tcl
       id: tcl-setup-step
-      uses: apnadkarni/tcl-setup@v1
+      uses: apnadkarni/tcl-setup@v2
       with:
         tcl-tag: ${{ matrix.tcl-tag }}
 
     - name: Build extension
       id: tcl-build-step
-      uses: apnadkarni/tcl-build-extension@v1
+      uses: apnadkarni/tcl-build-extension@v2
       with:
         run-tests: ${{ inputs.run-tests }}
 
