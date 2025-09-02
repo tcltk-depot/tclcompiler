@@ -27,7 +27,7 @@ on:
           - '["macos-13"]'
           - '["macos-14"]'
           - '["macos-15"]'
-          - '["macos-13", "macos-14", "macos-15]'
+          - '["macos-13", "macos-14", "macos-15"]'
         default: '["macos-latest"]'
       run-tests: # Whether tests should be run
         description: 'Run tests as well'
