@@ -19,6 +19,11 @@ For detailed usage, limitations and other information, see the Chapter 6 of the
 [TclPro User's Guide](https://www.tcl-lang.org/software/tclpro/doc/TclProUsersGuide14.pdf).
 Although dated, most of the information there is still applicable.
 
+## Tcl version support
+
+The package supports Tcl 8.6 and Tcl 9.0. However, files compiled for Tcl 8
+cannot be loaded into a Tcl 9 interpreter with `tbcload` and vice versa.
+
 ## License and Copyright
 
 ```
