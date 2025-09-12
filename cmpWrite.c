@@ -114,7 +114,7 @@ static char errorMessage[] = LOADER_ERROR_MESSAGE;
 static char errorVariable[] = LOADER_ERROR_VARIABLE;
 static char evalCommand[] = CMP_EVAL_COMMAND;
 static char loaderName[] = CMP_READER_PACKAGE;
-static char loaderVersion[] = CMP_VERSION;
+static char loaderVersion[] = TBCLOAD_VERSION;
 static char procCommand[] = CMP_PROC_COMMAND;
 
 /*
@@ -1414,7 +1414,7 @@ static int EmitAuxDataArray(Tcl_Interp* interp, ByteCode* codePtr, Tcl_Channel c
 static int EmitSignature(Tcl_Interp* interp, Tcl_Channel chan)
 {
     if ((EmitString(interp, signatureHeader, -1, ' ', chan) != TCL_OK) ||
-        (EmitTclSize(interp, formatVersion, ' ', chan) != TCL_OK) || (EmitString(interp, CMP_VERSION, -1, ' ', chan) != TCL_OK) ||
+        (EmitTclSize(interp, formatVersion, ' ', chan) != TCL_OK) || (EmitString(interp, PACKAGE_VERSION, -1, ' ', chan) != TCL_OK) ||
         (EmitString(interp, TCL_VERSION, -1, '\n', chan) != TCL_OK))
     {
         PrependResult(interp, "error writing signature: ");
