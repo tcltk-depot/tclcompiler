@@ -24,6 +24,9 @@ Although dated, most of the information there is still applicable.
 The package supports Tcl 8.6 and Tcl 9.0. However, files compiled for Tcl 8
 cannot be loaded into a Tcl 9 interpreter with `tbcload` and vice versa.
 
+This package does not support Tcl 9.1. Use the
+[tbcx](https://github.com/bagnongithub/tbcx) extension instead.
+
 ## License and Copyright
 
 ```
