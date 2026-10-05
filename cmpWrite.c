@@ -2000,6 +2000,17 @@ static int CompileObject(Tcl_Interp* interp, Tcl_Obj* objPtr)
 {
     int result;
     ProcInfo info;
+    Interp* iPtr = (Interp*)interp;
+    CallFrame* savedFramePtr;
+
+    /*
+     * Compile from the global frame, as if by "uplevel #0". Otherwise
+     * variables named like the calling proc's locals bind to its slots,
+     * which do not exist when tbcload runs the script.
+     */
+
+    savedFramePtr = iPtr->varFramePtr;
+    iPtr->varFramePtr = iPtr->rootFramePtr;
 
     /*
      * Before starting the compile, temporarily override the Command struct
@@ -2052,6 +2063,8 @@ static int CompileObject(Tcl_Interp* interp, Tcl_Obj* objPtr)
     }
 
     ReleaseCompilerContext(interp);
+
+    iPtr->varFramePtr = savedFramePtr;
 
     return result;
 }

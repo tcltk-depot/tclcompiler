@@ -84,5 +84,19 @@ test compiler-2.6 {compile erroring proc script (tc5)} -body {
     compile_one tc5.tcl
 } -result 1
 
+test compiler-3.1 {compiling inside a proc matches compiling at top level} -setup {
+    set in [makeFile {set out ok; set src $out} tc7.tcl]
+    proc compile_in_proc {src out} {
+        compiler::compile $src $out
+    }
+} -body {
+    compiler::compile $in [file join $outDir tc7top$tbcExt]
+    compile_in_proc $in [file join $outDir tc7proc$tbcExt]
+    string equal [viewFile tc7top$tbcExt $outDir] [viewFile tc7proc$tbcExt $outDir]
+} -cleanup {
+    rename compile_in_proc {}
+    removeFile tc7.tcl
+} -result 1
+
 ::tcltest::cleanupTests
 return
